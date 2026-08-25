@@ -1,0 +1,44 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Friendly paths for the Strava endpoints
+[[redirects]]
+  from = "/api/strava/auth"
+  to = "/.netlify/functions/strava-auth"
+  status = 200
+
+[[redirects]]
+  from = "/api/strava/callback"
+  to = "/.netlify/functions/strava-callback"
+  status = 200
+
+[[redirects]]
+  from = "/api/strava/status"
+  to = "/.netlify/functions/strava-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/strava/sync"
+  to = "/.netlify/functions/strava-sync"
+  status = 200
+
+[[redirects]]
+  from = "/api/strava/disconnect"
+  to = "/.netlify/functions/strava-disconnect"
+  status = 200
+
+# SPA fallback
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
