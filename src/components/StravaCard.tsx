@@ -18,8 +18,13 @@ export function StravaCard({ onSynced }: { onSynced?: () => void }) {
   useEffect(() => {
     const s = params.get('strava')
     if (!s) return
-    setMsg(s === 'connected' ? 'Strava connected.' : s === 'denied' ? 'Strava access was declined.' : 'Strava connection failed.')
-    params.delete('strava'); setParams(params, { replace: true })
+    const reason = params.get('reason')
+    setMsg(
+      s === 'connected' ? 'Strava connected.'
+        : s === 'denied' ? 'Strava access was declined.'
+        : `Strava connection failed${reason ? `: ${reason}` : '.'}`,
+    )
+    params.delete('strava'); params.delete('reason'); setParams(params, { replace: true })
     refresh()
     if (s === 'connected') sync()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -62,10 +67,11 @@ export function StravaCard({ onSynced }: { onSynced?: () => void }) {
           <p className="text-xs text-ink-500 truncate">
             {!status.configured ? 'Not set up yet'
               : status.connected ? `Connected${status.athlete_name ? ` as ${status.athlete_name}` : ''}`
+              : status.message ? 'Not ready'
               : 'Ready to connect'}
           </p>
         </div>
-        {status.configured && (
+        {status.configured && !status.message && (
           status.connected ? (
             <button onClick={sync} disabled={busy} className="btn-primary px-4 py-2 text-xs">
               {busy ? 'Syncing…' : 'Sync'}
@@ -81,6 +87,12 @@ export function StravaCard({ onSynced }: { onSynced?: () => void }) {
           Add <code className="text-mint-400">STRAVA_CLIENT_ID</code> and <code className="text-mint-400">STRAVA_CLIENT_SECRET</code>{' '}
           in your Netlify environment variables, redeploy, and the Connect button appears here.
         </p>
+      )}
+
+      {status.configured && status.message && (
+        <div className="mt-3 rounded-xl bg-rose-500/10 border border-rose-500/25 px-3 py-2">
+          <p className="text-xs text-rose-400 leading-relaxed">{status.message}</p>
+        </div>
       )}
 
       {msg && <p className="mt-3 text-xs text-slate-300">{msg}</p>}

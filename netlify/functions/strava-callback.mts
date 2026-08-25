@@ -32,7 +32,9 @@ export default async function handler(req: Request): Promise<Response> {
       athlete_name: [athlete.firstname, athlete.lastname].filter(Boolean).join(' ') || null,
     })
     return Response.redirect(`${site}/runs?strava=connected`, 302)
-  } catch {
-    return Response.redirect(`${site}/runs?strava=failed`, 302)
+  } catch (e: any) {
+    // Carry the reason back to the UI — a bare "failed" is impossible to debug.
+    const reason = encodeURIComponent(String(e?.message ?? 'unknown').slice(0, 200))
+    return Response.redirect(`${site}/runs?strava=failed&reason=${reason}`, 302)
   }
 }
