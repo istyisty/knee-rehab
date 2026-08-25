@@ -4,7 +4,8 @@
   functions = "netlify/functions"
 
 [build.environment]
-  NODE_VERSION = "20"
+  # 22+: supabase-js needs a native WebSocket, which Node gained in 22.
+  NODE_VERSION = "22"
 
 # Friendly paths for the Strava endpoints
 [[redirects]]

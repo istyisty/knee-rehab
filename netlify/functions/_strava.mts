@@ -22,7 +22,12 @@ export function admin(): SupabaseClient {
   const url = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) throw new Error('Supabase service credentials are not configured')
-  return createClient(url, key, { auth: { persistSession: false } })
+  return createClient(url, key, {
+    auth: { persistSession: false },
+    // Nothing here subscribes to realtime; disabling the heartbeat keeps the
+    // client from reaching for a WebSocket it doesn't need.
+    realtime: { params: { eventsPerSecond: 0 } },
+  })
 }
 
 export function json(body: unknown, status = 200): Response {
