@@ -9,6 +9,7 @@ import Runs from './pages/Runs'
 // Charts are the heaviest dependency in the app — keep them off the first paint.
 const Progress = lazy(() => import('./pages/Progress'))
 import Settings from './pages/Settings'
+const Report = lazy(() => import('./pages/Report'))
 
 const TABS = [
   { to: '/', label: 'Today', icon: HomeIcon },
@@ -19,7 +20,7 @@ const TABS = [
 
 export default function App() {
   const { pathname } = useLocation()
-  const hideNav = pathname.startsWith('/session/')
+  const hideNav = pathname.startsWith('/session/') || pathname.startsWith('/report')
 
   if (!configured) return <NotConfigured />
 
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="/runs" element={<Runs />} />
           <Route path="/progress" element={<Progress />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/report" element={<Report />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         </Suspense>

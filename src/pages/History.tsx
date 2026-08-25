@@ -4,6 +4,7 @@ import { Header, Page } from '../components/Header'
 import { Empty, Spinner, StatusPill, Stars, SegmentedControl } from '../components/ui'
 import { PlanSheet } from '../components/PlanSheet'
 import { getSessions } from '../lib/api'
+import { OverdueActions } from '../components/Overdue'
 import type { WorkoutSession } from '../lib/types'
 import { fromISO, prettyDate, todayISO } from '../lib/format'
 
@@ -70,7 +71,7 @@ export default function History() {
                 {fromISO(`${month}-01`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
               </h2>
               <div className="space-y-2">
-                {items.map(s => <SessionRow key={s.id} session={s} />)}
+                {items.map(s => <SessionRow key={s.id} session={s} onChanged={load} />)}
               </div>
             </section>
           ))
@@ -81,22 +82,25 @@ export default function History() {
   )
 }
 
-function SessionRow({ session }: { session: WorkoutSession }) {
+function SessionRow({ session, onChanged }: { session: WorkoutSession; onChanged: () => void }) {
   const past = session.scheduled_date < todayISO()
   const missed = past && session.status === 'planned'
   return (
-    <Link to={`/session/${session.id}`} className="card px-4 py-3.5 flex items-center gap-3 active:scale-[.99] transition">
-      <div className="min-w-0 flex-1">
-        <p className="font-bold text-sm truncate">{session.name}</p>
-        <p className="text-xs text-ink-500 mt-0.5">
-          {prettyDate(session.scheduled_date)}
-          {missed && <span className="text-rose-400/80"> · missed</span>}
-          {session.knee_pain != null && <span> · knee {session.knee_pain}/10</span>}
-        </p>
-      </div>
-      {session.status === 'completed' && session.rating != null
-        ? <Stars value={session.rating} size="sm" />
-        : <StatusPill status={session.status} />}
-    </Link>
+    <div className="card px-4 py-3.5">
+      <Link to={`/session/${session.id}`} className="flex items-center gap-3 active:scale-[.99] transition">
+        <div className="min-w-0 flex-1">
+          <p className="font-bold text-sm truncate">{session.name}</p>
+          <p className="text-xs text-ink-500 mt-0.5">
+            {prettyDate(session.scheduled_date)}
+            {missed && <span className="text-rose-400/80"> · missed</span>}
+            {session.knee_pain != null && <span> · knee {session.knee_pain}/10</span>}
+          </p>
+        </div>
+        {session.status === 'completed' && session.rating != null
+          ? <Stars value={session.rating} size="sm" />
+          : <StatusPill status={session.status} />}
+      </Link>
+      {missed && <OverdueActions session={session} onDone={onChanged} />}
+    </div>
   )
 }

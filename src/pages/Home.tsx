@@ -4,7 +4,8 @@ import { Header, Page } from '../components/Header'
 import { Spinner, StatusPill, Stars } from '../components/ui'
 import { PlanSheet } from '../components/PlanSheet'
 import { RunSheet } from '../components/RunSheet'
-import { getRuns, getSessions } from '../lib/api'
+import { ensureScheduledSessions, getRuns, getSessions } from '../lib/api'
+import { OverdueActions } from '../components/Overdue'
 import type { Run, WorkoutSession } from '../lib/types'
 import { fmtDistance, fmtPace, longDate, prettyDate, todayISO } from '../lib/format'
 
@@ -22,6 +23,11 @@ export default function Home() {
 
   useEffect(() => { load() }, [load])
 
+  // Top the diary up from the recurring schedule, if one is set.
+  useEffect(() => {
+    ensureScheduledSessions().then(n => { if (n > 0) load() }).catch(() => {})
+  }, [load])
+
   const today = todayISO()
   const live = sessions.find(s => s.status === 'in_progress')
   const todays = sessions.filter(s => s.scheduled_date === today && s.status !== 'completed' && s.id !== live?.id)
@@ -29,6 +35,10 @@ export default function Home() {
     .filter(s => s.scheduled_date > today && (s.status === 'planned' || s.status === 'in_progress'))
     .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date))
   const next = live ?? todays[0] ?? upcoming[0]
+
+  const overdue = sessions
+    .filter(s => s.scheduled_date < today && s.status === 'planned')
+    .sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date))
 
   const done = sessions.filter(s => s.status === 'completed')
   const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - 6)
@@ -101,6 +111,27 @@ export default function Home() {
                 <Stat value={kmThisWeek.toFixed(1)} label="km" />
               </div>
             </div>
+
+            {/* Overdue */}
+            {overdue.length > 0 && (
+              <section>
+                <h3 className="label">Missed</h3>
+                <div className="space-y-2">
+                  {overdue.slice(0, 3).map(s => (
+                    <div key={s.id} className="card px-4 py-3.5">
+                      <Link to={`/session/${s.id}`} className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-sm">{s.name}</p>
+                          <p className="text-xs text-ink-500">Planned for {prettyDate(s.scheduled_date)}</p>
+                        </div>
+                        <span className="chip bg-rose-500/10 text-rose-400/80 border border-rose-500/20">Missed</span>
+                      </Link>
+                      <OverdueActions session={s} onDone={load} />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
             {/* Upcoming */}
             {upcoming.length > 0 && (

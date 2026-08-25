@@ -7,3 +7,6 @@ dist
 .DS_Store
 *.local
 qa/shots
+
+# Claude scratch: staging + files awaiting your deletion
+.attic/

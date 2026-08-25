@@ -18,6 +18,7 @@ async function mock(page) {
 
     if (req.method() !== 'GET') return respond(route, {})
 
+    if (table === 'app_settings') return respond(route, F.settings)
     if (table === 'exercises') return respond(route, F.exercises)
     if (table === 'workout_templates') return respond(route, F.templates)
     if (table === 'template_exercises') {
@@ -38,12 +39,26 @@ async function mock(page) {
     }
     if (table === 'runs') return respond(route, F.runs)
     if (table === 'session_exercises') {
+      if (select.includes('unilateral')) return respond(route, F.symmetryRows)
+      if (select.includes('target_sets')) {
+        // last-performance lookup
+        return respond(route, [{
+          id: 'lp1', exercise_id: 'e7', target_sets: 4, target_reps: 8,
+          session_sets: [
+            { side: 'left', reps: 8, weight: 10, completed: true, target_reps: 8 },
+            { side: 'left', reps: 8, weight: 10, completed: true, target_reps: 8 },
+            { side: 'right', reps: 8, weight: 10, completed: true, target_reps: 8 },
+            { side: 'right', reps: 8, weight: 10, completed: true, target_reps: 8 },
+          ],
+          workout_sessions: { id: 's9', scheduled_date: '2026-08-19', status: 'completed', knee_pain: 2 },
+        }])
+      }
       // progress history
       return respond(route, [
-        { id: 'h1', exercise_id: 'e7', session_sets: [{ reps: 8, weight: 10, completed: true }, { reps: 8, weight: 10, completed: true }], workout_sessions: { scheduled_date: '2026-07-20', status: 'completed' } },
-        { id: 'h2', exercise_id: 'e7', session_sets: [{ reps: 8, weight: 12.5, completed: true }, { reps: 8, weight: 12.5, completed: true }], workout_sessions: { scheduled_date: '2026-07-29', status: 'completed' } },
-        { id: 'h3', exercise_id: 'e7', session_sets: [{ reps: 8, weight: 15, completed: true }, { reps: 8, weight: 15, completed: true }, { reps: 6, weight: 17.5, completed: true }], workout_sessions: { scheduled_date: '2026-08-08', status: 'completed' } },
-        { id: 'h4', exercise_id: 'e7', session_sets: [{ reps: 8, weight: 17.5, completed: true }, { reps: 8, weight: 17.5, completed: true }, { reps: 8, weight: 20, completed: true }], workout_sessions: { scheduled_date: '2026-08-19', status: 'completed' } },
+        { id: 'h1', exercise_id: 'e7', name: 'Bulgarian Split Squat', unilateral: true, session_sets: [{ side: 'left', reps: 8, weight: 12.5, completed: true }, { side: 'right', reps: 8, weight: 10, completed: true }], workout_sessions: { scheduled_date: '2026-07-20', status: 'completed' } },
+        { id: 'h2', exercise_id: 'e7', name: 'Bulgarian Split Squat', unilateral: true, session_sets: [{ side: 'left', reps: 8, weight: 15, completed: true }, { side: 'right', reps: 8, weight: 12.5, completed: true }], workout_sessions: { scheduled_date: '2026-07-29', status: 'completed' } },
+        { id: 'h3', exercise_id: 'e7', name: 'Bulgarian Split Squat', unilateral: true, session_sets: [{ side: 'left', reps: 8, weight: 17.5, completed: true }, { side: 'right', reps: 8, weight: 15, completed: true }], workout_sessions: { scheduled_date: '2026-08-08', status: 'completed' } },
+        { id: 'h4', exercise_id: 'e7', name: 'Bulgarian Split Squat', unilateral: true, session_sets: [{ side: 'left', reps: 8, weight: 20, completed: true }, { side: 'right', reps: 8, weight: 17.5, completed: true }], workout_sessions: { scheduled_date: '2026-08-19', status: 'completed' } },
       ])
     }
     if (table === 'session_sets') return respond(route, [])
@@ -80,6 +95,7 @@ await shot('/progress', 'progress')
 await shot('/session/s1', 'session-active')
 await shot('/session/s3', 'session-done')
 await shot('/settings', 'settings')
+await shot('/report', 'report')
 await shot('/', 'sheet-plan', async () => {
   await page.getByRole('button', { name: /Plan workout/i }).first().click()
   await page.waitForTimeout(400)

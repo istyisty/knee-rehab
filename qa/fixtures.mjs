@@ -30,12 +30,16 @@ export const sessions = [
   { id: 's5', template_id: 't1', name: 'Strength A', scheduled_date: iso(-10), status: 'completed', started_at: null, completed_at: '', rating: 5, difficulty: 5, knee_pain: 4, swelling: 'mild', notes: null, created_at: '', updated_at: '' },
 ]
 
-const mkSets = (seId, n, target, weight, doneCount) =>
-  Array.from({ length: n }, (_, i) => ({
-    id: `${seId}-set${i + 1}`, session_exercise_id: seId, set_number: i + 1,
-    target_reps: target, reps: i < doneCount ? target : null, weight,
-    completed: i < doneCount, completed_at: null, notes: null,
-  }))
+const mkSets = (seId, n, target, weight, doneCount, unilateral) => {
+  const sides = unilateral ? ['left', 'right'] : ['both']
+  return Array.from({ length: n }, (_, i) =>
+    sides.map(side => ({
+      id: `${seId}-set${i + 1}-${side}`, session_exercise_id: seId, set_number: i + 1, side,
+      target_reps: target, reps: i < doneCount ? target : null,
+      weight: side === 'right' && weight ? weight : weight,
+      completed: i < doneCount, completed_at: null, notes: null,
+    }))).flat()
+}
 
 const plan = [
   ['x1', 'e1', 'Crab Walk', 'warmup', 'reps', false, false, 2, 15, 0, null, 2],
@@ -55,16 +59,16 @@ export const sessionDetail = {
   session_exercises: plan.map(([id, exId, name, block, unit, uni, load, sets, reps, order, weight, done]) => ({
     id, session_id: 's1', exercise_id: exId, name, block, unit, unilateral: uni, loadable: load,
     target_sets: sets, target_reps: reps, sort_order: order, notes: null,
-    session_sets: mkSets(id, sets, reps, weight, done),
+    session_sets: mkSets(id, sets, reps, weight, done, uni),
   })),
 }
 
 export const completedDetail = {
   ...sessions[2],
-  session_exercises: plan.slice(0, 6).map(([id, exId, name, block, unit, uni, load, sets, reps, order, weight]) => ({
+  session_exercises: plan.slice(0, 8).map(([id, exId, name, block, unit, uni, load, sets, reps, order, weight]) => ({
     id: id + 'c', session_id: 's3', exercise_id: exId, name, block, unit, unilateral: uni, loadable: load,
     target_sets: sets, target_reps: reps, sort_order: order, notes: null,
-    session_sets: mkSets(id + 'c', sets, reps, weight, sets),
+    session_sets: mkSets(id + 'c', sets, reps, weight, sets, uni),
   })),
 }
 
@@ -73,3 +77,18 @@ export const runs = [
   { id: 'r2', date: iso(-4), source: 'manual', strava_activity_id: null, name: 'Treadmill intervals', distance_m: 4000, moving_time_s: 1380, elapsed_time_s: null, elevation_gain_m: null, average_heartrate: null, max_heartrate: null, knee_pain: 2, rating: 3, notes: null, created_at: '' },
   { id: 'r3', date: iso(-8), source: 'strava', strava_activity_id: 112, name: 'Phoenix Park loop', distance_m: 8120, moving_time_s: 2760, elapsed_time_s: 2810, elevation_gain_m: 58, average_heartrate: 149, max_heartrate: 172, knee_pain: 3, rating: 4, notes: null, created_at: '' },
 ]
+
+export const settings = {
+  id: 1, operated_side: 'right', surgery_date: '2026-06-08',
+  schedule: { '2': 't1', '5': 't2' }, auto_plan_days: 14,
+}
+
+const symDates = ['2026-07-20', '2026-07-29', '2026-08-08', '2026-08-19', '2026-08-24']
+export const symmetryRows = symDates.map((d, i) => ({
+  unilateral: true,
+  workout_sessions: { scheduled_date: d, status: 'completed' },
+  session_sets: [
+    { side: 'left', reps: 8, weight: 20, completed: true },
+    { side: 'right', reps: 8, weight: [12.5, 14, 15, 17.5, 18][i], completed: true },
+  ],
+}))

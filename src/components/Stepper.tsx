@@ -29,8 +29,11 @@ export function Stepper({ value, onChange, step = 1, min = 0, max, suffix, place
     onChange(next)
   }
 
-  const h = compact ? 'h-10' : 'h-12'
-  const shoulder = compact ? 'w-8' : 'w-10'
+  // 44px tall even in compact rows: these get tapped with sweaty hands.
+  const h = compact ? 'h-11' : 'h-12'
+  // Narrow shoulders but full height: 44px of vertical target is what makes
+  // these tappable, and the width is needed by the number itself.
+  const shoulder = compact ? 'w-[30px]' : 'w-10'
   return (
     <div className={`flex items-stretch rounded-xl bg-ink-850 border border-ink-700 overflow-hidden ${h}`}>
       <button

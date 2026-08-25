@@ -1,5 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
+import { SyncPill } from './SyncPill'
 
 export function Header({ title, subtitle, action, back }: {
   title: string; subtitle?: string; action?: ReactNode; back?: string | (() => void)
@@ -21,6 +22,7 @@ export function Header({ title, subtitle, action, back }: {
           <h1 className="font-extrabold text-xl leading-tight truncate">{title}</h1>
           {subtitle && <p className="text-xs text-ink-500 truncate">{subtitle}</p>}
         </div>
+        <SyncPill />
         {action ?? (
           <Link to="/settings" aria-label="Settings"
             className="h-10 w-10 shrink-0 grid place-items-center rounded-full bg-ink-850 border border-ink-700 text-ink-500 active:scale-95">

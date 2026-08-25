@@ -2,6 +2,7 @@ export type Block = 'warmup' | 'plyo' | 'main'
 export type Unit = 'reps' | 'seconds'
 export type SessionStatus = 'planned' | 'in_progress' | 'completed' | 'skipped'
 export type Swelling = 'none' | 'mild' | 'moderate' | 'severe'
+export type Side = 'both' | 'left' | 'right'
 
 export interface Exercise {
   id: string
@@ -36,6 +37,7 @@ export interface SessionSet {
   id: string
   session_exercise_id: string
   set_number: number
+  side: Side
   target_reps: number | null
   reps: number | null
   weight: number | null
@@ -94,4 +96,28 @@ export interface Run {
   rating: number | null
   notes: string | null
   created_at: string
+}
+
+export interface AppSettings {
+  id: number
+  operated_side: 'left' | 'right' | null
+  surgery_date: string | null
+  /** weekday number (0 = Sunday) -> template id */
+  schedule: Record<string, string>
+  auto_plan_days: number
+}
+
+export interface LastPerformance {
+  date: string
+  knee_pain: number | null
+  /** one entry per side actually logged */
+  sides: {
+    side: Side
+    topWeight: number | null
+    totalReps: number
+    setsCompleted: number
+    setsPlanned: number
+  }[]
+  /** every prescribed set was completed at the target reps */
+  hitAllTargets: boolean
 }

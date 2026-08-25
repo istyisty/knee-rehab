@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { Header, Page } from '../components/Header'
 import { Empty, Spinner } from '../components/ui'
-import { getExerciseHistory, getExercises, getRuns, getSessions, type ExerciseHistoryPoint } from '../lib/api'
-import type { Exercise, Run, WorkoutSession } from '../lib/types'
+import {
+  getExerciseHistory, getExercises, getRuns, getSessions, getSettings, getSymmetryHistory,
+  type ExerciseHistoryPoint, type SymmetryPoint,
+} from '../lib/api'
+import type { AppSettings, Exercise, Run, WorkoutSession } from '../lib/types'
+import { Link } from 'react-router-dom'
 import { fromISO } from '../lib/format'
 
 const MINT = '#22c98a'
@@ -25,19 +29,23 @@ export default function Progress() {
   const [history, setHistory] = useState<ExerciseHistoryPoint[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingEx, setLoadingEx] = useState(false)
+  const [settings, setSettings] = useState<AppSettings | null>(null)
+  const [symmetry, setSymmetry] = useState<SymmetryPoint[]>([])
 
   useEffect(() => {
-    Promise.all([getExercises(), getSessions(200), getRuns(200)]).then(([e, s, r]) => {
+    Promise.all([getExercises(), getSessions(200), getRuns(200), getSettings()]).then(([e, s, r, st]) => {
       const loadable = e.filter(x => x.loadable)
       setExercises(loadable)
-      setSessions(s); setRuns(r)
-      setSelected(prev => prev || loadable[0]?.id || '')
+      setSessions(s); setRuns(r); setSettings(st)
+      setSelected(prev => prev || localStorage.getItem('kr.progressExercise') || loadable[0]?.id || '')
       setLoading(false)
+      if (st.operated_side) getSymmetryHistory(st.operated_side).then(setSymmetry).catch(() => {})
     })
   }, [])
 
   useEffect(() => {
     if (!selected) return
+    localStorage.setItem('kr.progressExercise', selected)
     setLoadingEx(true)
     getExerciseHistory(selected).then(h => { setHistory(h); setLoadingEx(false) })
   }, [selected])
@@ -91,6 +99,49 @@ export default function Progress() {
           <Tile value={avg} label="avg rating" />
         </div>
 
+        {/* Symmetry — the number that matters after a meniscectomy */}
+        <section className="card p-4">
+          <h2 className="font-bold text-sm">Operated leg vs the other</h2>
+          {!settings?.operated_side ? (
+            <p className="mt-2 text-sm text-ink-500 leading-relaxed">
+              Tell the app which knee was operated on in{' '}
+              <Link to="/settings" className="text-mint-400 font-semibold">Settings</Link>{' '}
+              and this chart will track how the gap is closing.
+            </p>
+          ) : symmetry.length === 0 ? (
+            <p className="mt-2 text-sm text-ink-500 leading-relaxed">
+              Complete a session with single-leg work logged on both sides and the comparison starts here.
+            </p>
+          ) : (
+            <>
+              <p className="text-xs text-ink-500 mt-0.5 mb-3">
+                {settings.operated_side === 'left' ? 'Left' : 'Right'} leg as a share of the other, across all single-leg work
+              </p>
+              <div className="h-44 -ml-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={symmetry} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                    <defs>
+                      <linearGradient id="sym" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={MINT} stopOpacity={0.45} />
+                        <stop offset="100%" stopColor={MINT} stopOpacity={0.02} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke={GRID} vertical={false} />
+                    <XAxis dataKey="date" tickFormatter={shortDate} stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} />
+                    <YAxis domain={[0, 120]} ticks={[0, 50, 100]} stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} width={32} />
+                    <ReferenceLine y={100} stroke={AXIS} strokeDasharray="4 4" />
+                    <Tooltip content={<ChartTip suffix="%" />} />
+                    <Area type="monotone" dataKey="pct" name="Symmetry" stroke={MINT} strokeWidth={2.5} fill="url(#sym)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              <p className="text-[11px] text-ink-600 text-center mt-1">
+                100% means both legs are doing the same work — the dashed line is the target
+              </p>
+            </>
+          )}
+        </section>
+
         {/* Per-exercise loading */}
         <section className="card p-4">
           <div className="flex items-center justify-between gap-3 mb-3">
@@ -115,6 +166,12 @@ export default function Progress() {
                     <Tooltip content={<ChartTip suffix=" kg" />} />
                     <Line type="monotone" dataKey="topWeight" name="Top set" stroke={MINT} strokeWidth={2.5}
                       dot={{ r: 3, fill: MINT, strokeWidth: 0 }} activeDot={{ r: 5 }} connectNulls />
+                    {history.some(h => h.left || h.right) && <>
+                      <Line type="monotone" dataKey="left.topWeight" name="Left" stroke={AXIS} strokeWidth={1.5}
+                        strokeDasharray="4 3" dot={false} connectNulls />
+                      <Line type="monotone" dataKey="right.topWeight" name="Right" stroke={AMBER} strokeWidth={1.5}
+                        strokeDasharray="4 3" dot={false} connectNulls />
+                    </>}
                   </LineChart>
                 </ResponsiveContainer>
               </div>

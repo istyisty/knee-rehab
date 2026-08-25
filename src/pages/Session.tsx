@@ -3,13 +3,17 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Header } from '../components/Header'
 import { Sheet, Scale10, Spinner, Stars, StatusPill } from '../components/ui'
 import { Stepper } from '../components/Stepper'
-import { RestTimer } from '../components/RestTimer'
+import { RestBar, RestControls } from '../components/RestBar'
 import {
-  addSet, completeSession, deleteSession, deleteSet, getExercises, getSession,
-  startSession, updateSession, updateSet,
+  addSet, cacheSession, completeSession, deleteSession, deleteSet, getExercises,
+  getLastPerformance, getSession, getSettings, startSession, updateSession, updateSet,
 } from '../lib/api'
-import type { Exercise, SessionExercise, SessionSet, Swelling, WorkoutSession } from '../lib/types'
-import { BLOCK_LABEL, longDate } from '../lib/format'
+import { startRest } from '../lib/rest'
+import { useWakeLock } from '../lib/hooks'
+import type {
+  AppSettings, Exercise, LastPerformance, SessionExercise, SessionSet, Side, Swelling, WorkoutSession,
+} from '../lib/types'
+import { BLOCK_LABEL, fmtWeight, longDate, prettyDate } from '../lib/format'
 
 export default function SessionPage() {
   const { id } = useParams<{ id: string }>()
@@ -17,6 +21,8 @@ export default function SessionPage() {
   const [params, setParams] = useSearchParams()
   const [session, setSession] = useState<WorkoutSession | null>(null)
   const [cues, setCues] = useState<Record<string, string>>({})
+  const [last, setLast] = useState<Record<string, LastPerformance>>({})
+  const [settings, setSettings] = useState<AppSettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [finishOpen, setFinishOpen] = useState(false)
@@ -31,13 +37,26 @@ export default function SessionPage() {
 
   useEffect(() => { load() }, [load])
 
-  // Form cues live on the exercise catalogue, not the session snapshot.
   useEffect(() => {
     getExercises()
       .then((list: Exercise[]) =>
         setCues(Object.fromEntries(list.filter(e => e.cue).map(e => [e.id, e.cue!]))))
       .catch(() => {})
+    getSettings().then(setSettings).catch(() => {})
   }, [])
+
+  // What you did last time, so today's numbers have something to beat.
+  useEffect(() => {
+    if (!session) return
+    const ids = (session.session_exercises ?? [])
+      .map(e => e.exercise_id).filter(Boolean) as string[]
+    getLastPerformance(ids, session.scheduled_date, session.id).then(setLast).catch(() => {})
+  }, [session?.id])
+
+  useEffect(() => { if (session) cacheSession(session) }, [session])
+
+  const inProgress = session?.status === 'in_progress'
+  useWakeLock(Boolean(inProgress))
 
   // ?start=1 arrives from the plan sheet's "Start now"
   useEffect(() => {
@@ -98,13 +117,12 @@ export default function SessionPage() {
         back={() => nav(-1)}
         action={
           <button onClick={() => setEditOpen(true)} aria-label="Workout options"
-            className="h-10 w-10 shrink-0 grid place-items-center rounded-full bg-ink-850 border border-ink-700 text-ink-500 active:scale-95">
+            className="h-11 w-11 shrink-0 grid place-items-center rounded-full bg-ink-850 border border-ink-700 text-ink-500 active:scale-95">
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="12" cy="19" r="1.7" /></svg>
           </button>
         }
       />
 
-      {/* Progress rail */}
       <div className="sticky top-16 z-20 bg-ink-950/85 backdrop-blur-xl border-b border-ink-800/70">
         <div className="mx-auto max-w-md px-4 py-2.5 flex items-center gap-3">
           <div className="flex-1 h-1.5 rounded-full bg-ink-800 overflow-hidden">
@@ -115,12 +133,12 @@ export default function SessionPage() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-md px-4 py-5 space-y-5 pb-48">
+      <div className="mx-auto max-w-md px-4 py-5 space-y-5 pb-56">
         {session.status === 'planned' && (
           <button onClick={begin} className="btn-primary w-full py-4 text-base">Start workout</button>
         )}
 
-        {session.status === 'in_progress' && <RestTimer />}
+        {inProgress && <RestControls />}
 
         {isDone && <CompletedSummary session={session} onEdit={() => setFinishOpen(true)} />}
 
@@ -136,9 +154,21 @@ export default function SessionPage() {
                   key={ex.id}
                   exercise={ex}
                   cue={ex.exercise_id ? cues[ex.exercise_id] : undefined}
+                  last={ex.exercise_id ? last[ex.exercise_id] : undefined}
+                  operatedSide={settings?.operated_side ?? null}
                   locked={session.status === 'planned'}
+                  restOnTick={inProgress}
                   onSetChange={patchSetLocal}
-                  onReload={load}
+                  onLocalAdd={(exId, set) => setSession(prev => prev && ({
+                    ...prev,
+                    session_exercises: prev.session_exercises!.map(e =>
+                      e.id === exId ? { ...e, session_sets: [...(e.session_sets ?? []), set] } : e),
+                  }))}
+                  onLocalRemove={(exId, setIds) => setSession(prev => prev && ({
+                    ...prev,
+                    session_exercises: prev.session_exercises!.map(e =>
+                      e.id === exId ? { ...e, session_sets: (e.session_sets ?? []).filter(s => !setIds.includes(s.id)) } : e),
+                  }))}
                 />
               ))}
             </div>
@@ -150,7 +180,8 @@ export default function SessionPage() {
         )}
       </div>
 
-      {/* Finish bar */}
+      {session.status !== 'planned' && <RestBar bottomOffset="calc(4.75rem + env(safe-area-inset-bottom, 0px))" />}
+
       {session.status !== 'planned' && (
         <div className="fixed bottom-0 inset-x-0 z-30 bg-ink-950/90 backdrop-blur-xl border-t border-ink-800 pb-dock">
           <div className="mx-auto max-w-md px-4 py-3">
@@ -181,29 +212,45 @@ export default function SessionPage() {
 
 /* ---------------- Exercise card ---------------- */
 
-function ExerciseCard({ exercise, cue, locked, onSetChange, onReload }: {
+const SIDE_LABEL: Record<Side, string> = { both: '', left: 'L', right: 'R' }
+
+function ExerciseCard({
+  exercise, cue, last, operatedSide, locked, restOnTick, onSetChange, onLocalAdd, onLocalRemove,
+}: {
   exercise: SessionExercise
   cue?: string
+  last?: LastPerformance
+  operatedSide: 'left' | 'right' | null
   locked: boolean
+  restOnTick: boolean
   onSetChange: (setId: string, patch: Partial<SessionSet>) => void
-  onReload: () => void
+  onLocalAdd: (exerciseId: string, set: SessionSet) => void
+  onLocalRemove: (exerciseId: string, setIds: string[]) => void
 }) {
   const sets = exercise.session_sets ?? []
   const done = sets.filter(s => s.completed).length
   const complete = sets.length > 0 && done === sets.length
   const unitLabel = exercise.unit === 'seconds' ? 'secs' : 'reps'
+  const sides: Side[] = exercise.unilateral ? ['left', 'right'] : ['both']
 
-  const addAnother = async () => {
-    const last = sets[sets.length - 1]
-    await addSet(exercise.id, (last?.set_number ?? 0) + 1, exercise.target_reps, last?.weight ?? null)
-    onReload()
+  // Group by set number so a single-leg set shows L and R together.
+  const setNumbers = [...new Set(sets.map(s => s.set_number))].sort((a, b) => a - b)
+
+  const addAnother = () => {
+    const next = (setNumbers[setNumbers.length - 1] ?? 0) + 1
+    for (const side of sides) {
+      const prev = sets.filter(s => s.side === side).slice(-1)[0]
+      const row = addSet(exercise.id, next, exercise.target_reps, prev?.weight ?? null, side)
+      onLocalAdd(exercise.id, { ...row, completed_at: null, notes: null } as unknown as SessionSet)
+    }
   }
 
-  const dropLast = async () => {
-    const last = sets[sets.length - 1]
-    if (!last) return
-    await deleteSet(last.id)
-    onReload()
+  const dropLast = () => {
+    const n = setNumbers[setNumbers.length - 1]
+    if (n == null || setNumbers.length <= 1) return
+    const doomed = sets.filter(s => s.set_number === n)
+    doomed.forEach(s => deleteSet(s.id))
+    onLocalRemove(exercise.id, doomed.map(s => s.id))
   }
 
   return (
@@ -223,30 +270,42 @@ function ExerciseCard({ exercise, cue, locked, onSetChange, onReload }: {
         <span className="chip bg-ink-850 border border-ink-700 text-ink-500 tabular-nums shrink-0">{done}/{sets.length}</span>
       </div>
 
+      {last && <LastTime last={last} loadable={exercise.loadable} unit={unitLabel} />}
+
       <div className="px-4 pb-4 space-y-2">
-        {/* column headings */}
-        <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-ink-600 px-0.5">
-          <span className="w-6 shrink-0">Set</span>
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-600 px-2">
+          <span className="w-6 shrink-0">{exercise.unilateral ? 'Side' : 'Set'}</span>
           <span className="flex-1 text-center">{unitLabel}</span>
           {exercise.loadable && <span className="flex-1 text-center">kg</span>}
           <span className="w-11 shrink-0" />
         </div>
 
-        {sets.map(s => (
-          <SetRow
-            key={s.id}
-            set={s}
-            loadable={exercise.loadable}
-            locked={locked}
-            onChange={patch => onSetChange(s.id, patch)}
-          />
+        {setNumbers.map(n => (
+          <div key={n} className={exercise.unilateral ? 'rounded-xl bg-ink-950/40 p-0.5' : ''}>
+            {sides.map(side => {
+              const set = sets.find(s => s.set_number === n && s.side === side)
+              if (!set) return null
+              return (
+                <SetRow
+                  key={set.id}
+                  set={set}
+                  label={exercise.unilateral ? SIDE_LABEL[side] : String(n)}
+                  operated={exercise.unilateral && operatedSide === side}
+                  loadable={exercise.loadable}
+                  locked={locked}
+                  restOnTick={restOnTick}
+                  onChange={patch => onSetChange(set.id, patch)}
+                />
+              )
+            })}
+          </div>
         ))}
 
         {!locked && (
           <div className="flex gap-2 pt-1">
-            <button onClick={addAnother} className="btn-ghost flex-1 py-2 text-xs">+ Add set</button>
-            {sets.length > 1 && (
-              <button onClick={dropLast} className="btn-ghost px-3 py-2 text-xs text-ink-500">Remove last</button>
+            <button onClick={addAnother} className="btn-ghost flex-1 h-11 text-xs">+ Add set</button>
+            {setNumbers.length > 1 && (
+              <button onClick={dropLast} className="btn-ghost px-3 h-11 text-xs text-ink-500">Remove last</button>
             )}
           </div>
         )}
@@ -255,15 +314,44 @@ function ExerciseCard({ exercise, cue, locked, onSetChange, onReload }: {
   )
 }
 
-function SetRow({ set, loadable, locked, onChange }: {
-  set: SessionSet; loadable: boolean; locked: boolean; onChange: (patch: Partial<SessionSet>) => void
+/** Last session's numbers for this exercise — the basis for today's decision. */
+function LastTime({ last, loadable, unit }: { last: LastPerformance; loadable: boolean; unit: string }) {
+  const parts = last.sides.map(s => {
+    const label = s.side === 'both' ? '' : `${SIDE_LABEL[s.side]} `
+    const load = loadable && s.topWeight != null ? ` @ ${fmtWeight(s.topWeight)}kg` : ''
+    return `${label}${s.setsCompleted}×${s.totalReps && s.setsCompleted ? Math.round(s.totalReps / s.setsCompleted) : 0}${load}`
+  })
+
+  return (
+    <div className="mx-4 mb-3 rounded-xl bg-ink-850/60 border border-ink-800 px-3 py-2">
+      <p className="text-[11px] text-ink-500">
+        <span className="font-semibold text-slate-400">{prettyDate(last.date)}</span>
+        {' · '}{parts.join(' / ')}
+        {last.knee_pain != null && <span> · knee {last.knee_pain}/10</span>}
+      </p>
+      {last.hitAllTargets && (
+        <p className="text-[11px] text-mint-400/90 mt-1">
+          Every set completed at target {unit} — worth considering a step up.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function SetRow({ set, label, operated, loadable, locked, restOnTick, onChange }: {
+  set: SessionSet
+  label: string
+  operated: boolean
+  loadable: boolean
+  locked: boolean
+  restOnTick: boolean
+  onChange: (patch: Partial<SessionSet>) => void
 }) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Debounced write-behind: the steppers stay instant, the DB catches up.
   const persist = (patch: Record<string, unknown>) => {
     if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => { updateSet(set.id, patch).catch(() => {}) }, 500)
+    timer.current = setTimeout(() => { updateSet(set.id, patch) }, 400)
   }
 
   const setField = (field: 'reps' | 'weight', v: number | null) => {
@@ -273,9 +361,8 @@ function SetRow({ set, loadable, locked, onChange }: {
 
   const toggle = () => {
     const next = !set.completed
-    // Ticking a set with no reps entered assumes you hit the target.
-    // Include the current reps/weight: toggling cancels any pending debounced
-    // write, so a value typed a moment ago would otherwise be dropped.
+    // Include reps/weight: toggling cancels the pending debounced write, so a
+    // value typed a moment ago would otherwise be dropped.
     const patch: Partial<SessionSet> = {
       completed: next,
       completed_at: next ? new Date().toISOString() : null,
@@ -284,14 +371,19 @@ function SetRow({ set, loadable, locked, onChange }: {
     }
     onChange(patch)
     if (timer.current) clearTimeout(timer.current)
-    updateSet(set.id, patch as Record<string, unknown>).catch(() => {})
-    if (next && navigator.vibrate) navigator.vibrate(12)
+    updateSet(set.id, patch as Record<string, unknown>)
+    if (next) {
+      if (navigator.vibrate) navigator.vibrate(12)
+      if (restOnTick) startRest()
+    }
   }
 
   return (
-    <div className={`flex items-center gap-2 rounded-xl px-1.5 py-1.5 transition ${set.completed ? 'bg-mint-500/[0.07]' : ''}`}>
-      <span className={`w-6 shrink-0 text-center text-xs font-bold tabular-nums ${set.completed ? 'text-mint-400' : 'text-ink-500'}`}>
-        {set.set_number}
+    <div className={`flex items-center gap-1.5 rounded-xl px-1.5 py-1.5 transition ${set.completed ? 'bg-mint-500/[0.07]' : ''}`}>
+      <span className={`w-6 shrink-0 text-center text-xs font-bold tabular-nums ${
+        set.completed ? 'text-mint-400' : operated ? 'text-amber-400' : 'text-ink-500'
+      }`}>
+        {label}
       </span>
       <div className="flex-1 min-w-0">
         <Stepper compact value={set.reps} onChange={v => setField('reps', v)}
@@ -306,7 +398,7 @@ function SetRow({ set, loadable, locked, onChange }: {
         onClick={toggle}
         disabled={locked}
         aria-label={set.completed ? 'Mark set incomplete' : 'Mark set complete'}
-        className={`w-11 h-10 shrink-0 grid place-items-center rounded-xl border transition active:scale-90 disabled:opacity-30 ${
+        className={`w-11 h-11 shrink-0 grid place-items-center rounded-xl border transition active:scale-90 disabled:opacity-30 ${
           set.completed
             ? 'bg-mint-500 border-mint-500 text-ink-950'
             : 'bg-ink-850 border-ink-700 text-ink-600'
@@ -334,7 +426,7 @@ function CompletedSummary({ session, onEdit }: { session: WorkoutSession; onEdit
           <p className="text-xs font-semibold uppercase tracking-wide text-mint-400">Completed</p>
           <Stars value={session.rating} size="sm" />
         </div>
-        <button onClick={onEdit} className="btn-ghost px-3 py-1.5 text-xs">Edit</button>
+        <button onClick={onEdit} className="btn-ghost px-3 h-11 text-xs">Edit</button>
       </div>
       {bits.length > 0 && <p className="mt-2 text-xs text-ink-500">{bits.join(' · ')}</p>}
       {session.notes && <p className="mt-2 text-sm text-slate-300 leading-relaxed">{session.notes}</p>}
@@ -400,7 +492,7 @@ function FinishSheet({ open, onClose, session, onSaved }: {
           <div className="grid grid-cols-4 gap-1.5">
             {SWELLING.map(s => (
               <button key={s.value} onClick={() => setSwelling(swelling === s.value ? null : s.value)}
-                className={`rounded-lg py-2.5 text-xs font-semibold border transition active:scale-95 ${
+                className={`rounded-lg h-11 text-xs font-semibold border transition active:scale-95 ${
                   swelling === s.value ? 'bg-mint-500 text-ink-950 border-mint-500' : 'bg-ink-850 border-ink-700 text-ink-500'
                 }`}>{s.label}</button>
             ))}

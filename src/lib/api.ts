@@ -1,20 +1,37 @@
 import { supabase } from './supabase'
+import { enqueue } from './queue'
+import { cacheGet, cacheSet } from './cache'
 import type {
-  Exercise, WorkoutTemplate, TemplateExercise, WorkoutSession, SessionExercise, Run,
+  AppSettings, Exercise, LastPerformance, Run, SessionExercise, Side,
+  TemplateExercise, WorkoutSession, WorkoutTemplate,
 } from './types'
+import { toISO, todayISO } from './format'
+
+const newId = () =>
+  (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`)
 
 /* ---------------- Templates & exercises ---------------- */
 
 export async function getTemplates(): Promise<WorkoutTemplate[]> {
   const { data, error } = await supabase
     .from('workout_templates').select('*').order('sort_order')
-  if (error) throw error
+  if (error) {
+    const cached = cacheGet<WorkoutTemplate[]>('templates')
+    if (cached) return cached
+    throw error
+  }
+  cacheSet('templates', data)
   return data as WorkoutTemplate[]
 }
 
 export async function getExercises(): Promise<Exercise[]> {
   const { data, error } = await supabase.from('exercises').select('*').order('name')
-  if (error) throw error
+  if (error) {
+    const cached = cacheGet<Exercise[]>('exercises')
+    if (cached) return cached
+    throw error
+  }
+  cacheSet('exercises', data)
   return data as Exercise[]
 }
 
@@ -28,6 +45,27 @@ export async function getTemplateExercises(templateId: string): Promise<Template
   return data as TemplateExercise[]
 }
 
+/* ---------------- Settings ---------------- */
+
+const DEFAULT_SETTINGS: AppSettings = {
+  id: 1, operated_side: null, surgery_date: null, schedule: {}, auto_plan_days: 14,
+}
+
+export async function getSettings(): Promise<AppSettings> {
+  const { data, error } = await supabase.from('app_settings').select('*').eq('id', 1).maybeSingle()
+  if (error || !data) {
+    return cacheGet<AppSettings>('settings') ?? DEFAULT_SETTINGS
+  }
+  cacheSet('settings', data)
+  return data as AppSettings
+}
+
+export async function saveSettings(patch: Partial<AppSettings>) {
+  const current = await getSettings()
+  cacheSet('settings', { ...current, ...patch })
+  enqueue({ table: 'app_settings', kind: 'update', rowId: '1', payload: patch })
+}
+
 /* ---------------- Sessions ---------------- */
 
 export async function getSessions(limit = 100): Promise<WorkoutSession[]> {
@@ -35,7 +73,12 @@ export async function getSessions(limit = 100): Promise<WorkoutSession[]> {
     .from('workout_sessions').select('*')
     .order('scheduled_date', { ascending: false })
     .limit(limit)
-  if (error) throw error
+  if (error) {
+    const cached = cacheGet<WorkoutSession[]>('sessions')
+    if (cached) return cached
+    throw error
+  }
+  cacheSet('sessions', data)
   return data as WorkoutSession[]
 }
 
@@ -45,18 +88,32 @@ export async function getSession(id: string): Promise<WorkoutSession> {
     .select('*, session_exercises(*, session_sets(*))')
     .eq('id', id)
     .single()
-  if (error) throw error
-  const s = data as WorkoutSession
-  s.session_exercises?.sort((a, b) => a.sort_order - b.sort_order)
-  s.session_exercises?.forEach(e => e.session_sets?.sort((a, b) => a.set_number - b.set_number))
+
+  if (error || !data) {
+    // Offline: fall back to the copy taken when the workout was last opened.
+    const cached = cacheGet<WorkoutSession>(`session.${id}`)
+    if (cached) return cached
+    throw error ?? new Error('Workout not found')
+  }
+
+  const s = sortSession(data as WorkoutSession)
+  cacheSet(`session.${id}`, s)
   return s
 }
 
-/**
- * Build a dated session from a template. The warm up block is pulled in from the
- * shared Warm Up template so it stays in one place, and every prescribed set is
- * materialised up front so the workout screen is just tapping through rows.
- */
+function sortSession(s: WorkoutSession): WorkoutSession {
+  s.session_exercises?.sort((a, b) => a.sort_order - b.sort_order)
+  s.session_exercises?.forEach(e =>
+    e.session_sets?.sort((a, b) =>
+      a.set_number - b.set_number || a.side.localeCompare(b.side)))
+  return s
+}
+
+/** Keep the offline copy in step with what's on screen. */
+export function cacheSession(s: WorkoutSession) {
+  cacheSet(`session.${s.id}`, s)
+}
+
 export async function planSession(templateId: string, date: string): Promise<string> {
   const templates = await getTemplates()
   const template = templates.find(t => t.id === templateId)
@@ -75,7 +132,6 @@ export async function planSession(templateId: string, date: string): Promise<str
     .select().single()
   if (sErr) throw sErr
 
-  // Carry the last used weight for each exercise forward so you start where you left off.
   const lastWeights = await getLastWeights()
 
   const rows = blocks.map((te, i) => ({
@@ -95,46 +151,111 @@ export async function planSession(templateId: string, date: string): Promise<str
     .from('session_exercises').insert(rows).select()
   if (eErr) throw eErr
 
-  const setRows = (inserted as SessionExercise[]).flatMap(se =>
-    Array.from({ length: se.target_sets }, (_, i) => ({
-      session_exercise_id: se.id,
-      set_number: i + 1,
-      target_reps: se.target_reps,
-      reps: null,
-      weight: se.loadable ? (lastWeights[se.exercise_id ?? ''] ?? null) : null,
-      completed: false,
-    })),
-  )
+  const setRows = (inserted as SessionExercise[]).flatMap(se => {
+    // Single-leg work gets a row per side so the two can be compared later.
+    const sides: Side[] = se.unilateral ? ['left', 'right'] : ['both']
+    return Array.from({ length: se.target_sets }, (_, i) =>
+      sides.map(side => ({
+        id: newId(),
+        session_exercise_id: se.id,
+        set_number: i + 1,
+        side,
+        target_reps: se.target_reps,
+        reps: null,
+        weight: se.loadable ? (lastWeights[`${se.exercise_id}.${side}`] ?? null) : null,
+        completed: false,
+      })),
+    ).flat()
+  })
+
   const { error: setErr } = await supabase.from('session_sets').insert(setRows)
   if (setErr) throw setErr
 
   return session.id as string
 }
 
-/** Most recent logged weight per exercise, so new sessions prefill sensibly. */
+/** Most recent logged weight per exercise and side, so new sessions prefill sensibly. */
 export async function getLastWeights(): Promise<Record<string, number>> {
   const { data, error } = await supabase
     .from('session_sets')
-    .select('weight, session_exercises!inner(exercise_id, workout_sessions!inner(scheduled_date))')
+    .select('weight, side, session_exercises!inner(exercise_id, workout_sessions!inner(scheduled_date))')
     .not('weight', 'is', null)
     .eq('completed', true)
-    .order('id', { ascending: false })
-    .limit(500)
+    .limit(1000)
   if (error) return {}
+
   const out: Record<string, number> = {}
   const seen: Record<string, string> = {}
   for (const row of data as any[]) {
     const exId = row.session_exercises?.exercise_id
     const date = row.session_exercises?.workout_sessions?.scheduled_date
     if (!exId || !date) continue
-    if (!seen[exId] || date > seen[exId]) { seen[exId] = date; out[exId] = Number(row.weight) }
+    const key = `${exId}.${row.side}`
+    if (!seen[key] || date > seen[key]) { seen[key] = date; out[key] = Number(row.weight) }
+  }
+  return out
+}
+
+/**
+ * What happened the last time each of these exercises was done, so the workout
+ * screen can show you what you're trying to beat.
+ */
+export async function getLastPerformance(
+  exerciseIds: string[], beforeDate: string, excludeSessionId?: string,
+): Promise<Record<string, LastPerformance>> {
+  if (!exerciseIds.length) return {}
+
+  const { data, error } = await supabase
+    .from('session_exercises')
+    .select('id, exercise_id, target_sets, target_reps, session_sets(side, reps, weight, completed, target_reps), workout_sessions!inner(id, scheduled_date, status, knee_pain)')
+    .in('exercise_id', exerciseIds)
+    .eq('workout_sessions.status', 'completed')
+    .lte('workout_sessions.scheduled_date', beforeDate)
+    .limit(500)
+  if (error) return {}
+
+  const best: Record<string, any> = {}
+  for (const row of data as any[]) {
+    const session = row.workout_sessions
+    if (excludeSessionId && session.id === excludeSessionId) continue
+    const exId = row.exercise_id
+    if (!exId) continue
+    if (!best[exId] || session.scheduled_date > best[exId].workout_sessions.scheduled_date) {
+      best[exId] = row
+    }
+  }
+
+  const out: Record<string, LastPerformance> = {}
+  for (const [exId, row] of Object.entries<any>(best)) {
+    const bySide = new Map<Side, { topWeight: number | null; totalReps: number; setsCompleted: number; setsPlanned: number }>()
+    let hitAll = true
+    for (const s of row.session_sets ?? []) {
+      const side = (s.side ?? 'both') as Side
+      const entry = bySide.get(side) ?? { topWeight: null, totalReps: 0, setsCompleted: 0, setsPlanned: 0 }
+      entry.setsPlanned++
+      if (s.completed) {
+        entry.setsCompleted++
+        entry.totalReps += Number(s.reps ?? 0)
+        const w = s.weight == null ? null : Number(s.weight)
+        if (w != null && (entry.topWeight == null || w > entry.topWeight)) entry.topWeight = w
+        if (s.target_reps != null && Number(s.reps ?? 0) < Number(s.target_reps)) hitAll = false
+      } else {
+        hitAll = false
+      }
+      bySide.set(side, entry)
+    }
+    out[exId] = {
+      date: row.workout_sessions.scheduled_date,
+      knee_pain: row.workout_sessions.knee_pain,
+      sides: [...bySide.entries()].map(([side, v]) => ({ side, ...v })),
+      hitAllTargets: hitAll,
+    }
   }
   return out
 }
 
 export async function updateSession(id: string, patch: Partial<WorkoutSession>) {
-  const { error } = await supabase.from('workout_sessions').update(patch).eq('id', id)
-  if (error) throw error
+  enqueue({ table: 'workout_sessions', kind: 'update', rowId: id, payload: patch as Record<string, unknown> })
 }
 
 export async function deleteSession(id: string) {
@@ -157,53 +278,28 @@ export async function completeSession(id: string, patch: Partial<WorkoutSession>
 /* ---------------- Sets ---------------- */
 
 export async function updateSet(id: string, patch: Record<string, unknown>) {
-  const { error } = await supabase.from('session_sets').update(patch).eq('id', id)
-  if (error) throw error
+  enqueue({ table: 'session_sets', kind: 'update', rowId: id, payload: patch })
 }
 
-export async function addSet(sessionExerciseId: string, setNumber: number, targetReps: number | null, weight: number | null) {
-  const { data, error } = await supabase.from('session_sets')
-    .insert({ session_exercise_id: sessionExerciseId, set_number: setNumber, target_reps: targetReps, weight })
-    .select().single()
-  if (error) throw error
-  return data
+export function addSet(
+  sessionExerciseId: string, setNumber: number, targetReps: number | null,
+  weight: number | null, side: Side,
+) {
+  const row = {
+    id: newId(),
+    session_exercise_id: sessionExerciseId,
+    set_number: setNumber,
+    side,
+    target_reps: targetReps,
+    weight,
+    completed: false,
+  }
+  enqueue({ table: 'session_sets', kind: 'insert', payload: row })
+  return row
 }
 
 export async function deleteSet(id: string) {
-  const { error } = await supabase.from('session_sets').delete().eq('id', id)
-  if (error) throw error
-}
-
-export async function updateSessionExercise(id: string, patch: Record<string, unknown>) {
-  const { error } = await supabase.from('session_exercises').update(patch).eq('id', id)
-  if (error) throw error
-}
-
-export async function removeSessionExercise(id: string) {
-  const { error } = await supabase.from('session_exercises').delete().eq('id', id)
-  if (error) throw error
-}
-
-/** Add an extra exercise into an existing session (e.g. physio added something). */
-export async function addExerciseToSession(sessionId: string, exercise: Exercise, sets: number, reps: number, sortOrder: number) {
-  const { data, error } = await supabase.from('session_exercises').insert({
-    session_id: sessionId,
-    exercise_id: exercise.id,
-    name: exercise.name,
-    block: exercise.block,
-    unit: exercise.unit,
-    unilateral: exercise.unilateral,
-    loadable: exercise.loadable,
-    target_sets: sets,
-    target_reps: reps,
-    sort_order: sortOrder,
-  }).select().single()
-  if (error) throw error
-  const setRows = Array.from({ length: sets }, (_, i) => ({
-    session_exercise_id: data.id, set_number: i + 1, target_reps: reps, completed: false,
-  }))
-  await supabase.from('session_sets').insert(setRows)
-  return data
+  enqueue({ table: 'session_sets', kind: 'delete', rowId: id })
 }
 
 /* ---------------- Runs ---------------- */
@@ -211,25 +307,65 @@ export async function addExerciseToSession(sessionId: string, exercise: Exercise
 export async function getRuns(limit = 100): Promise<Run[]> {
   const { data, error } = await supabase
     .from('runs').select('*').order('date', { ascending: false }).limit(limit)
-  if (error) throw error
+  if (error) {
+    const cached = cacheGet<Run[]>('runs')
+    if (cached) return cached
+    throw error
+  }
+  cacheSet('runs', data)
   return data as Run[]
 }
 
 export async function saveRun(run: Partial<Run> & { id?: string }) {
   if (run.id) {
     const { id, ...patch } = run
-    const { error } = await supabase.from('runs').update(patch).eq('id', id)
-    if (error) throw error
+    enqueue({ table: 'runs', kind: 'update', rowId: id, payload: patch as Record<string, unknown> })
     return id
   }
-  const { data, error } = await supabase.from('runs').insert(run).select().single()
-  if (error) throw error
-  return data.id as string
+  const id = newId()
+  enqueue({ table: 'runs', kind: 'insert', payload: { ...run, id } })
+  return id
 }
 
 export async function deleteRun(id: string) {
-  const { error } = await supabase.from('runs').delete().eq('id', id)
-  if (error) throw error
+  enqueue({ table: 'runs', kind: 'delete', rowId: id })
+}
+
+/* ---------------- Scheduling ---------------- */
+
+/**
+ * Materialise planned sessions for the configured weekdays, a fortnight ahead.
+ * Idempotent: a date that already has a session of that template is skipped.
+ */
+export async function ensureScheduledSessions(): Promise<number> {
+  const settings = await getSettings()
+  const entries = Object.entries(settings.schedule ?? {}).filter(([, v]) => v)
+  if (!entries.length) return 0
+
+  const today = todayISO()
+  const horizon = new Date()
+  horizon.setDate(horizon.getDate() + (settings.auto_plan_days ?? 14))
+
+  const { data: existing } = await supabase
+    .from('workout_sessions').select('scheduled_date, template_id')
+    .gte('scheduled_date', today)
+  const taken = new Set((existing ?? []).map((r: any) => `${r.scheduled_date}.${r.template_id}`))
+
+  let created = 0
+  for (let d = new Date(); d <= horizon; d.setDate(d.getDate() + 1)) {
+    const templateId = settings.schedule[String(d.getDay())]
+    if (!templateId) continue
+    const iso = toISO(d)
+    if (taken.has(`${iso}.${templateId}`)) continue
+    try { await planSession(templateId, iso); created++ }
+    catch { /* offline or a race with another device — try again next launch */ }
+  }
+  return created
+}
+
+/** Move an overdue workout to today. */
+export async function rescheduleSession(id: string, date: string) {
+  await updateSession(id, { scheduled_date: date })
 }
 
 /* ---------------- Progress ---------------- */
@@ -239,12 +375,14 @@ export interface ExerciseHistoryPoint {
   topWeight: number | null
   volume: number
   totalReps: number
+  left: { topWeight: number | null; volume: number } | null
+  right: { topWeight: number | null; volume: number } | null
 }
 
 export async function getExerciseHistory(exerciseId: string): Promise<ExerciseHistoryPoint[]> {
   const { data, error } = await supabase
     .from('session_exercises')
-    .select('id, exercise_id, session_sets(reps, weight, completed), workout_sessions!inner(scheduled_date, status)')
+    .select('id, exercise_id, session_sets(side, reps, weight, completed), workout_sessions!inner(scheduled_date, status)')
     .eq('exercise_id', exerciseId)
     .eq('workout_sessions.status', 'completed')
   if (error) throw error
@@ -252,16 +390,74 @@ export async function getExerciseHistory(exerciseId: string): Promise<ExerciseHi
   const byDate = new Map<string, ExerciseHistoryPoint>()
   for (const row of data as any[]) {
     const date = row.workout_sessions.scheduled_date
-    const point = byDate.get(date) ?? { date, topWeight: null, volume: 0, totalReps: 0 }
+    const point = byDate.get(date) ?? {
+      date, topWeight: null, volume: 0, totalReps: 0, left: null, right: null,
+    }
     for (const s of row.session_sets ?? []) {
       if (!s.completed) continue
       const reps = Number(s.reps ?? 0)
       const weight = s.weight == null ? null : Number(s.weight)
+      const vol = reps * (weight ?? 0)
       point.totalReps += reps
-      point.volume += reps * (weight ?? 0)
+      point.volume += vol
       if (weight != null && (point.topWeight == null || weight > point.topWeight)) point.topWeight = weight
+
+      const side = s.side as Side
+      if (side === 'left' || side === 'right') {
+        const cur = point[side] ?? { topWeight: null, volume: 0 }
+        cur.volume += vol
+        if (weight != null && (cur.topWeight == null || weight > cur.topWeight)) cur.topWeight = weight
+        point[side] = cur
+      }
     }
     byDate.set(date, point)
   }
   return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
+}
+
+export interface SymmetryPoint {
+  date: string
+  /** operated side as a percentage of the other side, by volume */
+  pct: number
+  operated: number
+  other: number
+}
+
+/**
+ * The number that matters after a meniscectomy: how close the operated leg is
+ * to the other one. Aggregated across every single-leg exercise in a session.
+ */
+export async function getSymmetryHistory(operatedSide: 'left' | 'right'): Promise<SymmetryPoint[]> {
+  const { data, error } = await supabase
+    .from('session_exercises')
+    .select('unilateral, session_sets(side, reps, weight, completed), workout_sessions!inner(scheduled_date, status)')
+    .eq('unilateral', true)
+    .eq('workout_sessions.status', 'completed')
+    .limit(1000)
+  if (error) return []
+
+  const byDate = new Map<string, { left: number; right: number }>()
+  for (const row of data as any[]) {
+    const date = row.workout_sessions.scheduled_date
+    const entry = byDate.get(date) ?? { left: 0, right: 0 }
+    for (const s of row.session_sets ?? []) {
+      if (!s.completed) continue
+      const reps = Number(s.reps ?? 0)
+      const weight = s.weight == null ? null : Number(s.weight)
+      // Bodyweight single-leg work still counts — reps carry the load there.
+      const contribution = weight ? reps * weight : reps
+      if (s.side === 'left') entry.left += contribution
+      if (s.side === 'right') entry.right += contribution
+    }
+    byDate.set(date, entry)
+  }
+
+  return [...byDate.entries()]
+    .map(([date, v]) => {
+      const operated = operatedSide === 'left' ? v.left : v.right
+      const other = operatedSide === 'left' ? v.right : v.left
+      return { date, operated, other, pct: other > 0 ? Math.round((operated / other) * 100) : 0 }
+    })
+    .filter(p => p.operated > 0 || p.other > 0)
+    .sort((a, b) => a.date.localeCompare(b.date))
 }
