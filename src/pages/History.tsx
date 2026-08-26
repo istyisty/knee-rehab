@@ -3,23 +3,40 @@ import { Link } from 'react-router-dom'
 import { Header, Page } from '../components/Header'
 import { Empty, Spinner, StatusPill, Stars, SegmentedControl } from '../components/ui'
 import { PlanSheet } from '../components/PlanSheet'
-import { getSessions } from '../lib/api'
 import { OverdueActions } from '../components/Overdue'
-import type { WorkoutSession } from '../lib/types'
+import { MonthCalendar } from '../components/MonthCalendar'
+import { DaySheet } from '../components/DaySheet'
+import { RunSheet } from '../components/RunSheet'
+import { getRuns, getSessions } from '../lib/api'
+import type { Run, WorkoutSession } from '../lib/types'
 import { fromISO, prettyDate, todayISO } from '../lib/format'
 
 type Filter = 'all' | 'planned' | 'completed'
+type View = 'list' | 'calendar'
+
+const VIEW_KEY = 'kr.historyView'
 
 export default function History() {
   const [sessions, setSessions] = useState<WorkoutSession[]>([])
+  const [runs, setRuns] = useState<Run[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<Filter>('all')
+  const [view, setView] = useState<View>(() => (localStorage.getItem(VIEW_KEY) as View) ?? 'calendar')
   const [planOpen, setPlanOpen] = useState(false)
 
+  // Calendar state
+  const now = new Date()
+  const [cursor, setCursor] = useState({ year: now.getFullYear(), month: now.getMonth() })
+  const [selectedDay, setSelectedDay] = useState<string | null>(null)
+  const [editingRun, setEditingRun] = useState<Run | null>(null)
+
   const load = useCallback(async () => {
-    setSessions(await getSessions(200)); setLoading(false)
+    const [s, r] = await Promise.all([getSessions(400), getRuns(400)])
+    setSessions(s); setRuns(r); setLoading(false)
   }, [])
   useEffect(() => { load() }, [load])
+
+  useEffect(() => { localStorage.setItem(VIEW_KEY, view) }, [view])
 
   const filtered = useMemo(() => {
     if (filter === 'planned') return sessions.filter(s => s.status === 'planned' || s.status === 'in_progress')
@@ -27,7 +44,6 @@ export default function History() {
     return sessions
   }, [sessions, filter])
 
-  // Group by month so a long rehab block stays readable
   const months = useMemo(() => {
     const map = new Map<string, WorkoutSession[]>()
     for (const s of filtered) {
@@ -37,6 +53,14 @@ export default function History() {
     return [...map.entries()]
   }, [filtered])
 
+  const step = (delta: number) => setCursor(({ year, month }) => {
+    const d = new Date(year, month + delta, 1)
+    return { year: d.getFullYear(), month: d.getMonth() }
+  })
+
+  const daySessions = selectedDay ? sessions.filter(s => s.scheduled_date === selectedDay) : []
+  const dayRuns = selectedDay ? runs.filter(r => r.date === selectedDay) : []
+
   return (
     <>
       <Header
@@ -44,39 +68,77 @@ export default function History() {
         subtitle={`${sessions.filter(s => s.status === 'completed').length} completed`}
         action={
           <button onClick={() => setPlanOpen(true)} aria-label="Plan a workout"
-            className="h-10 w-10 shrink-0 grid place-items-center rounded-full bg-mint-500 text-ink-950 font-bold text-xl active:scale-95">+</button>
+            className="h-11 w-11 shrink-0 grid place-items-center rounded-full bg-mint-500 text-ink-950 font-bold text-xl active:scale-95">+</button>
         }
       />
       <Page>
         <SegmentedControl
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: 'all', label: 'All' },
-            { value: 'planned', label: 'Upcoming' },
-            { value: 'completed', label: 'Done' },
-          ]}
+          value={view}
+          onChange={setView}
+          options={[{ value: 'calendar', label: 'Calendar' }, { value: 'list', label: 'List' }]}
         />
 
-        {loading ? <Spinner /> : filtered.length === 0 ? (
-          <Empty
-            title="Nothing here yet"
-            body="Plan Strength A or B and it'll show up in this list."
-            action={<button onClick={() => setPlanOpen(true)} className="btn-primary px-5 py-2.5">Plan a workout</button>}
+        {loading ? <Spinner /> : view === 'calendar' ? (
+          <MonthCalendar
+            year={cursor.year}
+            month={cursor.month}
+            sessions={sessions}
+            runs={runs}
+            selected={selectedDay}
+            onSelect={setSelectedDay}
+            onPrev={() => step(-1)}
+            onNext={() => step(1)}
+            onToday={() => setCursor({ year: new Date().getFullYear(), month: new Date().getMonth() })}
           />
         ) : (
-          months.map(([month, items]) => (
-            <section key={month}>
-              <h2 className="label">
-                {fromISO(`${month}-01`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
-              </h2>
-              <div className="space-y-2">
-                {items.map(s => <SessionRow key={s.id} session={s} onChanged={load} />)}
-              </div>
-            </section>
-          ))
+          <>
+            <SegmentedControl
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: 'all', label: 'All' },
+                { value: 'planned', label: 'Upcoming' },
+                { value: 'completed', label: 'Done' },
+              ]}
+            />
+
+            {filtered.length === 0 ? (
+              <Empty
+                title="Nothing here yet"
+                body="Plan Strength A or B and it'll show up in this list."
+                action={<button onClick={() => setPlanOpen(true)} className="btn-primary px-5 py-2.5">Plan a workout</button>}
+              />
+            ) : (
+              months.map(([month, items]) => (
+                <section key={month}>
+                  <h2 className="label">
+                    {fromISO(`${month}-01`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+                  </h2>
+                  <div className="space-y-2">
+                    {items.map(s => <SessionRow key={s.id} session={s} onChanged={load} />)}
+                  </div>
+                </section>
+              ))
+            )}
+          </>
         )}
       </Page>
+
+      <DaySheet
+        iso={selectedDay}
+        sessions={daySessions}
+        runs={dayRuns}
+        onClose={() => setSelectedDay(null)}
+        onOpenRun={run => setEditingRun(run)}
+      />
+
+      <RunSheet
+        open={editingRun != null}
+        run={editingRun}
+        onClose={() => setEditingRun(null)}
+        onSaved={load}
+      />
+
       <PlanSheet open={planOpen} onClose={() => setPlanOpen(false)} onPlanned={load} />
     </>
   )
