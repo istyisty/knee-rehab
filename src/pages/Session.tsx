@@ -155,7 +155,7 @@ export default function SessionPage() {
                   exercise={ex}
                   cue={ex.exercise_id ? cues[ex.exercise_id] : undefined}
                   last={ex.exercise_id ? last[ex.exercise_id] : undefined}
-                  operatedSide={settings?.operated_side ?? null}
+                  operatedSide={session.tracks_knee ? (settings?.operated_side ?? null) : null}
                   locked={session.status === 'planned'}
                   restOnTick={inProgress}
                   onSetChange={patchSetLocal}
@@ -481,23 +481,27 @@ function FinishSheet({ open, onClose, session, onSaved }: {
           <Stars value={rating} onChange={setRating} size="lg" />
         </div>
 
-        <div>
-          <span className="label">Knee pain</span>
-          <Scale10 value={pain} onChange={setPain} />
-          <div className="flex justify-between mt-1 text-[10px] text-ink-600"><span>None</span><span>Worst</span></div>
-        </div>
+        {session.tracks_knee && (
+          <>
+            <div>
+              <span className="label">Knee pain</span>
+              <Scale10 value={pain} onChange={setPain} />
+              <div className="flex justify-between mt-1 text-[10px] text-ink-600"><span>None</span><span>Worst</span></div>
+            </div>
 
-        <div>
-          <span className="label">Swelling afterwards</span>
-          <div className="grid grid-cols-4 gap-1.5">
-            {SWELLING.map(s => (
-              <button key={s.value} onClick={() => setSwelling(swelling === s.value ? null : s.value)}
-                className={`rounded-lg h-11 text-xs font-semibold border transition active:scale-95 ${
-                  swelling === s.value ? 'bg-mint-500 text-ink-950 border-mint-500' : 'bg-ink-850 border-ink-700 text-ink-500'
-                }`}>{s.label}</button>
-            ))}
-          </div>
-        </div>
+            <div>
+              <span className="label">Swelling afterwards</span>
+              <div className="grid grid-cols-4 gap-1.5">
+                {SWELLING.map(s => (
+                  <button key={s.value} onClick={() => setSwelling(swelling === s.value ? null : s.value)}
+                    className={`rounded-lg h-11 text-xs font-semibold border transition active:scale-95 ${
+                      swelling === s.value ? 'bg-mint-500 text-ink-950 border-mint-500' : 'bg-ink-850 border-ink-700 text-ink-500'
+                    }`}>{s.label}</button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
 
         <div>
           <span className="label">Effort (RPE 1–10)</span>
@@ -505,7 +509,7 @@ function FinishSheet({ open, onClose, session, onSaved }: {
         </div>
 
         <div>
-          <span className="label">Notes for the physio</span>
+          <span className="label">{session.tracks_knee ? 'Notes for the physio' : 'Notes'}</span>
           <textarea className="field min-h-[88px]" placeholder="What felt good, what didn't, anything you changed…"
             value={notes} onChange={e => setNotes(e.target.value)} />
         </div>

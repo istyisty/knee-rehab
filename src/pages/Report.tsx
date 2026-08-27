@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Spinner } from '../components/ui'
 import {
-  getExercises, getRuns, getSessions, getSettings, getSymmetryHistory, type SymmetryPoint,
+  getExercises, getPrograms, getRuns, getSessions, getSettings, getSymmetryHistory,
+  type SymmetryPoint,
 } from '../lib/api'
 import { supabase } from '../lib/supabase'
 import type { AppSettings, Exercise, Run, WorkoutSession } from '../lib/types'
@@ -28,6 +29,7 @@ export default function Report() {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [symmetry, setSymmetry] = useState<SymmetryPoint[]>([])
   const [loads, setLoads] = useState<ExerciseLoad[]>([])
+  const [rehab, setRehab] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const from = useMemo(() => {
@@ -36,9 +38,10 @@ export default function Report() {
 
   useEffect(() => {
     setLoading(true)
-    Promise.all([getSessions(400), getRuns(400), getSettings(), getExercises()])
-      .then(async ([s, r, st, exercises]) => {
+    Promise.all([getSessions(400), getRuns(400), getSettings(), getExercises(), getPrograms()])
+      .then(async ([s, r, st, exercises, programs]) => {
         setSessions(s); setRuns(r); setSettings(st)
+        setRehab(programs.some(p => p.tracks_knee))
         if (st.operated_side) {
           getSymmetryHistory(st.operated_side).then(setSymmetry).catch(() => {})
         }
@@ -84,7 +87,7 @@ export default function Report() {
             className="h-11 w-11 -ml-1 shrink-0 grid place-items-center rounded-full bg-ink-850 border border-ink-700 text-slate-300">
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
           </button>
-          <h1 className="font-extrabold text-xl flex-1">Physio summary</h1>
+          <h1 className="font-extrabold text-xl flex-1">{rehab ? 'Physio summary' : 'Training summary'}</h1>
           <button onClick={() => window.print()} className="btn-primary px-4 h-11 text-sm">Save PDF</button>
         </div>
         <div className="mx-auto max-w-md px-4 pb-3 flex gap-1.5">
@@ -99,7 +102,9 @@ export default function Report() {
 
       <div className="mx-auto max-w-md px-4 py-6 space-y-6 print:max-w-none print:px-0">
         <header>
-          <h2 className="text-2xl font-extrabold print:text-black">Knee rehab summary</h2>
+          <h2 className="text-2xl font-extrabold print:text-black">
+            {rehab ? 'Knee rehab summary' : 'Training summary'}
+          </h2>
           <p className="text-sm text-ink-500 print:text-gray-600 mt-1">
             {longDate(from)} to {longDate(toISO(new Date()))}
             {settings?.operated_side && ` · ${settings.operated_side} knee`}
@@ -117,7 +122,7 @@ export default function Report() {
             value={fmtAvg(done.filter(s => s.difficulty != null).map(s => s.difficulty!), '/10')} />
         </Block>
 
-        <Block title="Knee pain">
+        {rehab && <Block title="Knee pain">
           {painValues.length === 0 ? <Empty /> : (
             <>
               <Row label="Readings" value={String(painValues.length)} />
@@ -135,17 +140,17 @@ export default function Report() {
               )}
             </>
           )}
-        </Block>
+        </Block>}
 
-        <Block title="Swelling reported after sessions">
+        {rehab && <Block title="Swelling reported after sessions">
           {Object.keys(swellingCounts).length === 0 ? <Empty /> : (
             (['none', 'mild', 'moderate', 'severe'] as const)
               .filter(k => swellingCounts[k])
               .map(k => <Row key={k} label={k[0].toUpperCase() + k.slice(1)} value={String(swellingCounts[k])} />)
           )}
-        </Block>
+        </Block>}
 
-        {settings?.operated_side && (
+        {rehab && settings?.operated_side && (
           <Block title="Limb symmetry">
             {symmetry.length === 0 ? <Empty /> : (
               <>

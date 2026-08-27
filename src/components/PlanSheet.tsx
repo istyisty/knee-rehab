@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getTemplates, planSession } from '../lib/api'
-import type { WorkoutTemplate } from '../lib/types'
+import { getPrograms, getTemplates, planSession } from '../lib/api'
+import type { Program, WorkoutTemplate } from '../lib/types'
 import { Sheet } from './ui'
 import { todayISO, toISO, prettyDate } from '../lib/format'
 
@@ -11,6 +11,7 @@ export function PlanSheet({ open, onClose, defaultDate, onPlanned }: {
 }) {
   const nav = useNavigate()
   const [templates, setTemplates] = useState<WorkoutTemplate[]>([])
+  const [programs, setPrograms] = useState<Program[]>([])
   const [templateId, setTemplateId] = useState<string>('')
   const [date, setDate] = useState(defaultDate ?? todayISO())
   const [busy, setBusy] = useState(false)
@@ -20,10 +21,11 @@ export function PlanSheet({ open, onClose, defaultDate, onPlanned }: {
 
   useEffect(() => {
     if (!open) return
-    getTemplates().then(t => {
+    Promise.all([getTemplates(), getPrograms()]).then(([t, p]) => {
       const strength = t.filter(x => x.kind === 'strength')
       setTemplates(strength)
-      setTemplateId(prev => prev || strength[0]?.id || '')
+      setPrograms(p)
+      setTemplateId(prev => (prev && strength.some(x => x.id === prev)) ? prev : strength[0]?.id || '')
     }).catch(e => setErr(e.message))
   }, [open])
 
@@ -52,23 +54,39 @@ export function PlanSheet({ open, onClose, defaultDate, onPlanned }: {
       <div className="space-y-5">
         <div>
           <span className="label">Workout</span>
-          <div className="space-y-2">
-            {templates.map(t => (
-              <button
-                key={t.id}
-                onClick={() => setTemplateId(t.id)}
-                className={`w-full text-left rounded-xl border px-4 py-3 transition active:scale-[.99] ${
-                  templateId === t.id
-                    ? 'bg-mint-500/10 border-mint-500/40'
-                    : 'bg-ink-850 border-ink-700'
-                }`}
-              >
-                <p className={`font-bold ${templateId === t.id ? 'text-mint-400' : 'text-slate-200'}`}>{t.name}</p>
-                {t.description && <p className="text-xs text-ink-500 mt-0.5">{t.description}</p>}
-                {t.include_warmup && <p className="text-[11px] text-ink-500 mt-1">Includes the warm up</p>}
-              </button>
-            ))}
-          </div>
+          {templates.length === 0 ? (
+            <p className="text-sm text-ink-500 leading-relaxed">
+              No workouts yet — build one in Settings → Programs and workouts.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {programs
+                .filter(p => templates.some(t => t.program_id === p.id))
+                .map(program => (
+                  <section key={program.id}>
+                    <h3 className="label">{program.name}</h3>
+                    <div className="space-y-2">
+                      {templates.filter(t => t.program_id === program.id).map(t => (
+                        <TemplateOption key={t.id} template={t} selected={templateId === t.id}
+                          onSelect={() => setTemplateId(t.id)} />
+                      ))}
+                    </div>
+                  </section>
+                ))}
+
+              {templates.some(t => !t.program_id) && (
+                <section>
+                  <h3 className="label">Not in a program</h3>
+                  <div className="space-y-2">
+                    {templates.filter(t => !t.program_id).map(t => (
+                      <TemplateOption key={t.id} template={t} selected={templateId === t.id}
+                        onSelect={() => setTemplateId(t.id)} />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
         </div>
 
         <div>
@@ -97,5 +115,22 @@ export function PlanSheet({ open, onClose, defaultDate, onPlanned }: {
         </div>
       </div>
     </Sheet>
+  )
+}
+
+function TemplateOption({ template, selected, onSelect }: {
+  template: WorkoutTemplate; selected: boolean; onSelect: () => void
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      className={`w-full text-left rounded-xl border px-4 py-3 transition active:scale-[.99] ${
+        selected ? 'bg-mint-500/10 border-mint-500/40' : 'bg-ink-850 border-ink-700'
+      }`}
+    >
+      <p className={`font-bold ${selected ? 'text-mint-400' : 'text-slate-200'}`}>{template.name}</p>
+      {template.description && <p className="text-xs text-ink-500 mt-0.5">{template.description}</p>}
+      {template.include_warmup && <p className="text-[11px] text-ink-500 mt-1">Includes the warm up</p>}
+    </button>
   )
 }

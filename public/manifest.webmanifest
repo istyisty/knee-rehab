@@ -1,7 +1,7 @@
 {
-  "name": "Knee Rehab",
-  "short_name": "Rehab",
-  "description": "Meniscectomy rehab: strength sessions, runs and progress",
+  "name": "Workout Manager",
+  "short_name": "Workouts",
+  "description": "Build workouts and programs, log sessions and runs, track progress",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0c0f",

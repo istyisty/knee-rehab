@@ -8,5 +8,5 @@ dist
 *.local
 qa/shots
 
-# Claude scratch: staging + files awaiting your deletion
+# Scratch dir used when syncing into a local clone; safe to delete
 .attic/

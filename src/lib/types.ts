@@ -1,5 +1,5 @@
-export type Block = 'warmup' | 'plyo' | 'main'
-export type Unit = 'reps' | 'seconds'
+export type Block = 'warmup' | 'plyo' | 'main' | 'cooldown'
+export type Unit = 'reps' | 'seconds' | 'metres'
 export type SessionStatus = 'planned' | 'in_progress' | 'completed' | 'skipped'
 export type Swelling = 'none' | 'mild' | 'moderate' | 'severe'
 export type Side = 'both' | 'left' | 'right'
@@ -12,14 +12,37 @@ export interface Exercise {
   unilateral: boolean
   loadable: boolean
   cue: string | null
+  muscle_group: string | null
+  equipment: string | null
+  is_custom: boolean
+  archived: boolean
+  default_sets: number
+  default_reps: number
+}
+
+export interface Program {
+  id: string
+  name: string
+  description: string | null
+  /** Rehab prompts — knee pain, swelling, limb symmetry — only for programs that want them. */
+  tracks_knee: boolean
+  /** weekday "0"(Sun)-"6" -> workout template id */
+  schedule: Record<string, string>
+  /** weekdays that are run days */
+  run_days: number[]
+  archived: boolean
+  sort_order: number
+  created_at: string
 }
 
 export interface WorkoutTemplate {
   id: string
+  program_id: string | null
   name: string
   kind: 'strength' | 'warmup'
   description: string | null
   include_warmup: boolean
+  archived: boolean
   sort_order: number
 }
 
@@ -65,6 +88,9 @@ export interface SessionExercise {
 export interface WorkoutSession {
   id: string
   template_id: string | null
+  program_id: string | null
+  /** Snapshotted from the program so old sessions keep their prompts. */
+  tracks_knee: boolean
   name: string
   scheduled_date: string
   status: SessionStatus

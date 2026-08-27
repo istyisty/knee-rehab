@@ -1,8 +1,20 @@
 export const BLOCK_LABEL: Record<string, string> = {
   warmup: 'Warm Up',
   plyo: 'Plyometrics',
-  main: 'Strength',
+  main: 'Main',
+  cooldown: 'Cool Down',
 }
+
+export const UNIT_LABEL: Record<string, string> = {
+  reps: 'reps',
+  seconds: 'secs',
+  metres: 'metres',
+}
+
+export const WEEKDAY_LABELS: { n: string; label: string }[] = [
+  { n: '1', label: 'Mon' }, { n: '2', label: 'Tue' }, { n: '3', label: 'Wed' },
+  { n: '4', label: 'Thu' }, { n: '5', label: 'Fri' }, { n: '6', label: 'Sat' }, { n: '0', label: 'Sun' },
+]
 
 export function todayISO(): string {
   return toISO(new Date())

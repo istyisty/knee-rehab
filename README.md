@@ -1,23 +1,36 @@
-# Knee Rehab
+# Workout Manager
 
-A mobile-first PWA for working through a post-meniscectomy rehab plan: the two
-prescribed strength sessions with their shared warm up, run logging (manual or
-pulled from Strava), and the trends that show whether the knee is improving.
+A mobile-first PWA for building workouts, grouping them into programs, and
+logging what you actually did. It started life as a post-meniscectomy rehab
+tracker, and that plan is still in there as one program among others.
 
 ## What it does
 
-- Plan, run, edit and rate the two prescribed strength sessions, warm up included
-- **Per-side logging** for every single-leg exercise, and a symmetry chart showing
-  the operated leg as a percentage of the other — the number that matters most
-- **Works without signal.** Writes go through a persisted queue that retries until
-  the server confirms them, and save state is always visible rather than silent
-- Shows what you did last time under each exercise, and flags when every set was
-  completed at target
-- Rest timer that starts itself when you tick a set, and a screen wake lock so the
-  phone doesn't sleep mid-workout
-- Recurring weekly schedule that keeps the next fortnight planned
+**Programs and workouts**
+- Build a workout from a library of 70+ exercises, filtered by muscle group and
+  equipment, or add your own
+- Group workouts into a program with its own weekly schedule, including run days
+- A shared warm up per program, maintained in one place and pulled into every
+  session that asks for it
+- Each program decides whether it tracks rehab detail — knee pain, swelling and
+  limb symmetry — so a general strength block isn't asking about your knee
+
+**Logging**
+- Plan a session for any date; weights prefill from the last time you did it
+- Per-side logging for single-leg work, with a symmetry chart for rehab programs
+- Rest timer that starts itself when you tick a set, screen wake lock while training
+- Last session's numbers under each exercise, flagged when every set hit target
 - Manual run logging plus Strava OAuth and sync
+
+**Looking back**
+- Month calendar with per-day indicators, and a day summary that opens each item
+- Load, pain and weekly mileage charts
 - A printable summary for physio reviews
+
+**Reliability**
+- Every write goes through a persisted retry queue with visible status
+- Service worker plus a local copy of the open workout, so a session survives
+  a gym with no signal
 
 ## Stack
 
@@ -25,17 +38,6 @@ pulled from Strava), and the trends that show whether the knee is improving.
 - **Supabase** (Postgres) for storage
 - **Netlify** for hosting, with serverless functions handling the Strava OAuth
   exchange so the client secret never reaches the browser
-
-## The plan it was built from
-
-| | Sets × reps |
-|---|---|
-| **Warm Up** (added to every strength session) | Crab Walk 2×15 · SL Wall Sit 4×15s · Inner Range Quads 2×12 |
-| **Strength A** | Pogos 2×20 · Drop Lands 2×5 · Squat Jumps 3×5 · Bulgarian Split Squat 4×8 · SL RDL 3×8 · Step Up 3×8 · Calf Raise 3×20 |
-| **Strength B** | Pogos 2×20 · Drop Lands 2×5 · Squat Jumps 3×5 · Hip Thrust 3×8 · Pistol Squat 4×8 · Hamstring Bridge 3×8 |
-
-Templates live in the database, so adjusting the plan later is a data change,
-not a code change.
 
 ## Environment variables
 
@@ -48,20 +50,31 @@ not a code change.
 | `STRAVA_CLIENT_ID` | functions | From strava.com/settings/api |
 | `STRAVA_CLIENT_SECRET` | functions | Never exposed to the browser |
 
-Strava is optional: without those last two the app runs normally and the Runs
-tab shows a "not set up yet" panel instead of a Connect button.
+Strava is optional: without the last two the app runs normally and the Runs tab
+explains what's missing.
 
 ## Strava setup
 
 1. Create an API application at https://www.strava.com/settings/api
-2. Set **Authorization Callback Domain** to the site's domain (no scheme, no path)
-3. Add `STRAVA_CLIENT_ID` and `STRAVA_CLIENT_SECRET` in Netlify → Site
-   configuration → Environment variables, then redeploy
+2. Set **Authorization Callback Domain** to the site's bare domain — no scheme, no path
+3. Add the two Strava variables in Netlify, then redeploy
 4. Open the Runs tab and hit Connect
 
 Syncing pulls the last 100 activities and keeps runs only. Re-syncing refreshes
 distance, time and heart rate but leaves your knee-pain score, rating and notes
 untouched.
+
+## Offline behaviour
+
+`src/lib/queue.ts` is a write-behind queue. Every mutation is applied
+optimistically, persisted to `localStorage`, and retried on an interval, on
+`online`, and whenever the tab becomes visible. Repeated updates to the same row
+are merged, and an op the server keeps rejecting is dropped after six attempts so
+it can't block everything behind it. The header shows `Saving` / `Offline` /
+`Save failed` — never nothing.
+
+`src/lib/cache.ts` keeps a copy of each opened workout so a session can be worked
+through underground and synced when you resurface.
 
 ## Local development
 
@@ -73,17 +86,18 @@ npm run dev
 
 `npx netlify dev` runs the Strava functions alongside the app.
 
-## Offline behaviour
+## Tests
 
-`src/lib/queue.ts` is a write-behind queue. Every mutation is applied optimistically,
-persisted to `localStorage`, and retried on an interval, on `online`, and whenever the
-tab becomes visible. Repeated updates to the same row are merged, and an op that the
-server keeps rejecting is dropped after six attempts so it can't block everything
-behind it. The header shows `Saving` / `Offline` / `Save failed` — never nothing.
+`qa/` holds Playwright scripts that drive the app against `qa/mock.mjs`, a small
+stateful stand-in for PostgREST. They are run by hand:
 
-`src/lib/cache.ts` keeps a copy of each opened workout, so a session can be worked
-through in a basement gym and synced when you resurface. A service worker
-(vite-plugin-pwa) precaches the app shell so it opens at all.
+```bash
+npm run build && npx vite preview --port 4173 &
+node qa/shots.mjs      # screenshots every screen, checks for console errors
+node qa/builder.mjs    # creates a program, builds a workout, schedules it
+node qa/calendar.mjs   # calendar navigation and tap-through
+node qa/offline.mjs    # writes survive a dead connection
+```
 
 ## Database
 

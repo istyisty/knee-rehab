@@ -2,7 +2,7 @@ import { supabase } from './supabase'
 import { enqueue } from './queue'
 import { cacheGet, cacheSet } from './cache'
 import type {
-  AppSettings, Exercise, LastPerformance, Run, SessionExercise, Side,
+  AppSettings, Exercise, LastPerformance, Program, Run, SessionExercise, Side,
   TemplateExercise, WorkoutSession, WorkoutTemplate,
 } from './types'
 import { toISO, todayISO } from './format'
@@ -12,9 +12,10 @@ const newId = () =>
 
 /* ---------------- Templates & exercises ---------------- */
 
-export async function getTemplates(): Promise<WorkoutTemplate[]> {
-  const { data, error } = await supabase
-    .from('workout_templates').select('*').order('sort_order')
+export async function getTemplates(programId?: string): Promise<WorkoutTemplate[]> {
+  let q = supabase.from('workout_templates').select('*').eq('archived', false)
+  if (programId) q = q.eq('program_id', programId)
+  const { data, error } = await q.order('sort_order')
   if (error) {
     const cached = cacheGet<WorkoutTemplate[]>('templates')
     if (cached) return cached
@@ -25,7 +26,8 @@ export async function getTemplates(): Promise<WorkoutTemplate[]> {
 }
 
 export async function getExercises(): Promise<Exercise[]> {
-  const { data, error } = await supabase.from('exercises').select('*').order('name')
+  const { data, error } = await supabase
+    .from('exercises').select('*').eq('archived', false).order('name')
   if (error) {
     const cached = cacheGet<Exercise[]>('exercises')
     if (cached) return cached
@@ -117,18 +119,30 @@ export function cacheSession(s: WorkoutSession) {
 export async function planSession(templateId: string, date: string): Promise<string> {
   const templates = await getTemplates()
   const template = templates.find(t => t.id === templateId)
-  if (!template) throw new Error('Template not found')
+  if (!template) throw new Error('Workout not found')
+
+  const programs = await getPrograms()
+  const program = programs.find(p => p.id === template.program_id) ?? null
 
   const blocks: TemplateExercise[] = []
   if (template.include_warmup) {
-    const warm = templates.find(t => t.kind === 'warmup')
+    // The shared warm up is per program, so a rehab warm up never leaks into
+    // a strength program's session.
+    const warm = templates.find(t => t.kind === 'warmup' && t.program_id === template.program_id)
     if (warm) blocks.push(...await getTemplateExercises(warm.id))
   }
   blocks.push(...await getTemplateExercises(templateId))
 
   const { data: session, error: sErr } = await supabase
     .from('workout_sessions')
-    .insert({ template_id: templateId, name: template.name, scheduled_date: date, status: 'planned' })
+    .insert({
+      template_id: templateId,
+      program_id: template.program_id,
+      tracks_knee: program?.tracks_knee ?? false,
+      name: template.name,
+      scheduled_date: date,
+      status: 'planned',
+    })
     .select().single()
   if (sErr) throw sErr
 
@@ -338,9 +352,9 @@ export async function deleteRun(id: string) {
  * Idempotent: a date that already has a session of that template is skipped.
  */
 export async function ensureScheduledSessions(): Promise<number> {
-  const settings = await getSettings()
-  const entries = Object.entries(settings.schedule ?? {}).filter(([, v]) => v)
-  if (!entries.length) return 0
+  const [programs, settings] = await Promise.all([getPrograms(), getSettings()])
+  const active = programs.filter(p => !p.archived && Object.keys(p.schedule ?? {}).length > 0)
+  if (!active.length) return 0
 
   const today = todayISO()
   const horizon = new Date()
@@ -353,14 +367,23 @@ export async function ensureScheduledSessions(): Promise<number> {
 
   let created = 0
   for (let d = new Date(); d <= horizon; d.setDate(d.getDate() + 1)) {
-    const templateId = settings.schedule[String(d.getDay())]
-    if (!templateId) continue
     const iso = toISO(d)
-    if (taken.has(`${iso}.${templateId}`)) continue
-    try { await planSession(templateId, iso); created++ }
-    catch { /* offline or a race with another device — try again next launch */ }
+    const weekday = String(d.getDay())
+    for (const program of active) {
+      const templateId = (program.schedule ?? {})[weekday]
+      if (!templateId) continue
+      if (taken.has(`${iso}.${templateId}`)) continue
+      try { await planSession(templateId, iso); created++; taken.add(`${iso}.${templateId}`) }
+      catch { /* offline or a race with another device — try again next launch */ }
+    }
   }
   return created
+}
+
+/** Weekdays across every active program that are marked as run days. */
+export async function runDaysForDate(date: Date, programs: Program[]): Promise<Program[]> {
+  const weekday = date.getDay()
+  return programs.filter(p => !p.archived && (p.run_days ?? []).includes(weekday))
 }
 
 /** Move an overdue workout to today. */
@@ -460,4 +483,132 @@ export async function getSymmetryHistory(operatedSide: 'left' | 'right'): Promis
     })
     .filter(p => p.operated > 0 || p.other > 0)
     .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+/* ---------------- Programs ---------------- */
+
+export async function getPrograms(includeArchived = false): Promise<Program[]> {
+  let q = supabase.from('programs').select('*')
+  if (!includeArchived) q = q.eq('archived', false)
+  const { data, error } = await q.order('sort_order').order('created_at')
+  if (error) {
+    const cached = cacheGet<Program[]>('programs')
+    if (cached) return cached
+    throw error
+  }
+  cacheSet('programs', data)
+  return data as Program[]
+}
+
+export async function getProgram(id: string): Promise<Program | null> {
+  const { data } = await supabase.from('programs').select('*').eq('id', id).maybeSingle()
+  if (data) return data as Program
+  return (cacheGet<Program[]>('programs') ?? []).find(p => p.id === id) ?? null
+}
+
+export async function createProgram(patch: Partial<Program>): Promise<string> {
+  const { data, error } = await supabase
+    .from('programs')
+    .insert({ name: patch.name ?? 'New program', ...patch })
+    .select().single()
+  if (error) throw error
+  return data.id as string
+}
+
+export async function updateProgram(id: string, patch: Partial<Program>) {
+  enqueue({ table: 'programs', kind: 'update', rowId: id, payload: patch as Record<string, unknown> })
+}
+
+export async function deleteProgram(id: string) {
+  const { error } = await supabase.from('programs').delete().eq('id', id)
+  if (error) throw error
+}
+
+/* ---------------- Workout templates (the builder) ---------------- */
+
+export async function getTemplate(id: string): Promise<WorkoutTemplate | null> {
+  const { data } = await supabase.from('workout_templates').select('*').eq('id', id).maybeSingle()
+  return (data as WorkoutTemplate) ?? null
+}
+
+export async function createTemplate(patch: Partial<WorkoutTemplate>): Promise<string> {
+  const { data, error } = await supabase
+    .from('workout_templates')
+    .insert({
+      name: patch.name ?? 'New workout',
+      kind: patch.kind ?? 'strength',
+      include_warmup: patch.include_warmup ?? false,
+      ...patch,
+    })
+    .select().single()
+  if (error) throw error
+  return data.id as string
+}
+
+export async function updateTemplate(id: string, patch: Partial<WorkoutTemplate>) {
+  enqueue({ table: 'workout_templates', kind: 'update', rowId: id, payload: patch as Record<string, unknown> })
+}
+
+export async function deleteTemplate(id: string) {
+  const { error } = await supabase.from('workout_templates').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function addTemplateExercise(
+  templateId: string, exercise: Exercise, sets: number, reps: number, sortOrder: number,
+) {
+  const { data, error } = await supabase
+    .from('template_exercises')
+    .insert({
+      template_id: templateId,
+      exercise_id: exercise.id,
+      target_sets: sets,
+      target_reps: reps,
+      sort_order: sortOrder,
+    })
+    .select('*, exercises(*)').single()
+  if (error) throw error
+  return data as TemplateExercise
+}
+
+export async function updateTemplateExercise(id: string, patch: Record<string, unknown>) {
+  enqueue({ table: 'template_exercises', kind: 'update', rowId: id, payload: patch })
+}
+
+export async function removeTemplateExercise(id: string) {
+  const { error } = await supabase.from('template_exercises').delete().eq('id', id)
+  if (error) throw error
+}
+
+/** Persist a whole reordering in one go. */
+export async function reorderTemplateExercises(ids: string[]) {
+  await Promise.all(ids.map((id, i) =>
+    supabase.from('template_exercises').update({ sort_order: i }).eq('id', id)))
+}
+
+/* ---------------- Custom exercises ---------------- */
+
+export async function createExercise(patch: Partial<Exercise>): Promise<Exercise> {
+  const { data, error } = await supabase
+    .from('exercises')
+    .insert({
+      name: (patch.name ?? '').trim(),
+      block: patch.block ?? 'main',
+      unit: patch.unit ?? 'reps',
+      unilateral: patch.unilateral ?? false,
+      loadable: patch.loadable ?? true,
+      cue: patch.cue?.trim() || null,
+      muscle_group: patch.muscle_group ?? null,
+      equipment: patch.equipment ?? null,
+      default_sets: patch.default_sets ?? 3,
+      default_reps: patch.default_reps ?? 10,
+      is_custom: true,
+    })
+    .select().single()
+  if (error) throw error
+  return data as Exercise
+}
+
+export async function archiveExercise(id: string) {
+  enqueue({ table: 'exercises', kind: 'update', rowId: id, payload: { archived: true } })
 }

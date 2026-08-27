@@ -5,8 +5,8 @@ import {
 import { Header, Page } from '../components/Header'
 import { Empty, Spinner } from '../components/ui'
 import {
-  getExerciseHistory, getExercises, getRuns, getSessions, getSettings, getSymmetryHistory,
-  type ExerciseHistoryPoint, type SymmetryPoint,
+  getExerciseHistory, getExercises, getPrograms, getRuns, getSessions, getSettings,
+  getSymmetryHistory, type ExerciseHistoryPoint, type SymmetryPoint,
 } from '../lib/api'
 import type { AppSettings, Exercise, Run, WorkoutSession } from '../lib/types'
 import { Link } from 'react-router-dom'
@@ -31,6 +31,9 @@ export default function Progress() {
   const [loadingEx, setLoadingEx] = useState(false)
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [symmetry, setSymmetry] = useState<SymmetryPoint[]>([])
+  const [rehabActive, setRehabActive] = useState(false)
+
+  useEffect(() => { getPrograms().then(ps => setRehabActive(ps.some(p => p.tracks_knee))).catch(() => {}) }, [])
 
   useEffect(() => {
     Promise.all([getExercises(), getSessions(200), getRuns(200), getSettings()]).then(([e, s, r, st]) => {
@@ -100,7 +103,7 @@ export default function Progress() {
         </div>
 
         {/* Symmetry — the number that matters after a meniscectomy */}
-        <section className="card p-4">
+        {rehabActive && <section className="card p-4">
           <h2 className="font-bold text-sm">Operated leg vs the other</h2>
           {!settings?.operated_side ? (
             <p className="mt-2 text-sm text-ink-500 leading-relaxed">
@@ -140,7 +143,7 @@ export default function Progress() {
               </p>
             </>
           )}
-        </section>
+        </section>}
 
         {/* Per-exercise loading */}
         <section className="card p-4">
@@ -200,7 +203,7 @@ export default function Progress() {
         </section>
 
         {/* Knee pain */}
-        <section className="card p-4">
+        {rehabActive && <section className="card p-4">
           <h2 className="font-bold text-sm mb-3">Knee pain</h2>
           {painSeries.length === 0 ? (
             <p className="text-sm text-ink-500 text-center py-6">
@@ -223,7 +226,7 @@ export default function Progress() {
               <p className="text-[11px] text-ink-600 text-center mt-1">Worst score reported each day — lower is better</p>
             </>
           )}
-        </section>
+        </section>}
 
         {/* Weekly running */}
         <section className="card p-4">

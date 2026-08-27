@@ -1,0 +1,20 @@
+import { chromium } from 'playwright'
+import { makeDb, installMock } from './mock.mjs'
+const db = makeDb()
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
+const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
+const page = await ctx.newPage()
+await installMock(page, db)
+await page.route('**/api/strava/**', r => r.fulfill({ status: 200, contentType: 'application/json', body: '{"configured":false,"connected":false}' }))
+await page.goto('http://localhost:4173/workout/tpl-b', { waitUntil: 'networkidle' })
+await page.waitForTimeout(600)
+await page.getByRole('button', { name: /\+ Add/ }).first().click()
+await page.waitForTimeout(500)
+await page.screenshot({ path: 'qa/shots/v2-picker-open.png' })
+await page.getByRole('button', { name: 'back', exact: true }).count()
+// filtered
+await page.getByRole('button', { name: 'chest', exact: true }).click()
+await page.waitForTimeout(400)
+await page.screenshot({ path: 'qa/shots/v2-picker-filtered.png' })
+console.log('ok')
+await browser.close()

@@ -4,9 +4,9 @@ import { Header, Page } from '../components/Header'
 import { Spinner, StatusPill, Stars } from '../components/ui'
 import { PlanSheet } from '../components/PlanSheet'
 import { RunSheet } from '../components/RunSheet'
-import { ensureScheduledSessions, getRuns, getSessions } from '../lib/api'
+import { ensureScheduledSessions, getPrograms, getRuns, getSessions } from '../lib/api'
 import { OverdueActions } from '../components/Overdue'
-import type { Run, WorkoutSession } from '../lib/types'
+import type { Program, Run, WorkoutSession } from '../lib/types'
 import { fmtDistance, fmtPace, longDate, prettyDate, todayISO } from '../lib/format'
 
 export default function Home() {
@@ -15,10 +15,11 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [planOpen, setPlanOpen] = useState(false)
   const [runOpen, setRunOpen] = useState(false)
+  const [programs, setPrograms] = useState<Program[]>([])
 
   const load = useCallback(async () => {
-    const [s, r] = await Promise.all([getSessions(60), getRuns(10)])
-    setSessions(s); setRuns(r); setLoading(false)
+    const [s, r, p] = await Promise.all([getSessions(60), getRuns(10), getPrograms()])
+    setSessions(s); setRuns(r); setPrograms(p); setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -35,6 +36,10 @@ export default function Home() {
     .filter(s => s.scheduled_date > today && (s.status === 'planned' || s.status === 'in_progress'))
     .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date))
   const next = live ?? todays[0] ?? upcoming[0]
+
+  // A scheduled run day isn't a workout row — just a nudge, unless one is already logged.
+  const runToday = programs.some(p => (p.run_days ?? []).includes(new Date().getDay()))
+    && !runs.some(r => r.date === today)
 
   const overdue = sessions
     .filter(s => s.scheduled_date < today && s.status === 'planned')
@@ -54,7 +59,7 @@ export default function Home() {
 
   return (
     <>
-      <Header title="Knee Rehab" subtitle={longDate(today)} />
+      <Header title="Workouts" subtitle={longDate(today)} />
       <Page>
         {loading ? <Spinner label="Loading your plan" /> : (
           <>
@@ -81,6 +86,23 @@ export default function Home() {
                 <p className="mt-1 text-sm text-ink-500">Pick Strength A or B and get it in the diary.</p>
                 <button onClick={() => setPlanOpen(true)} className="btn-primary mt-4 w-full py-3">Plan a workout</button>
               </div>
+            )}
+
+            {runToday && (
+              <button onClick={() => setRunOpen(true)}
+                className="w-full card p-4 flex items-center gap-3 text-left border-[#fc4c02]/25 active:scale-[.99] transition">
+                <div className="h-10 w-10 shrink-0 rounded-xl bg-[#fc4c02]/15 text-[#fc7c42] grid place-items-center">
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="14.5" cy="4.5" r="1.9" />
+                    <path d="M12.8 8.4 9.5 10.7l1.9 3.1-1.2 5.6M11.4 13.8l3.6 1.4 1.5 4.2M12.8 8.4l3.4-.6 2.3 3.2 2.3.5M9.5 10.7 6.4 11l-1.3 2.6" />
+                  </svg>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-sm">Run day</p>
+                  <p className="text-xs text-ink-500">Scheduled for today — log it when you're back</p>
+                </div>
+                <span className="text-[#fc7c42] shrink-0" aria-hidden>→</span>
+              </button>
             )}
 
             {/* Quick actions */}
