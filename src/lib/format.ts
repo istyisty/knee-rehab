@@ -46,6 +46,13 @@ export function longDate(iso: string): string {
   })
 }
 
+/** "8" or "5-8", using an en dash so it reads as a range not a minus. */
+export function fmtRepTarget(min: number | null | undefined, max: number | null | undefined): string {
+  if (min == null) return '-'
+  if (max == null || max <= min) return String(min)
+  return `${min}\u2013${max}`
+}
+
 export function fmtDuration(secs: number | null | undefined): string {
   if (secs == null) return '–'
   const h = Math.floor(secs / 3600)

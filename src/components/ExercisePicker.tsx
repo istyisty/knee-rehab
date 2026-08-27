@@ -15,7 +15,7 @@ const EQUIPMENT = ['bodyweight', 'dumbbell', 'barbell', 'machine', 'cable', 'ket
 export function ExercisePicker({ open, onClose, onPick, excludeIds = [] }: {
   open: boolean
   onClose: () => void
-  onPick: (exercise: Exercise, sets: number, reps: number) => void
+  onPick: (exercise: Exercise, sets: number, reps: number, repsMax: number | null) => void
   excludeIds?: string[]
 }) {
   const [exercises, setExercises] = useState<Exercise[]>([])
@@ -56,7 +56,7 @@ export function ExercisePicker({ open, onClose, onPick, excludeIds = [] }: {
       <TargetSheet
         exercise={chosen}
         onBack={() => setChosen(null)}
-        onConfirm={(sets, reps) => { onPick(chosen, sets, reps); setChosen(null); onClose() }}
+        onConfirm={(sets, reps, repsMax) => { onPick(chosen, sets, reps, repsMax); setChosen(null); onClose() }}
       />
     )
   }
@@ -146,10 +146,16 @@ function FilterRow({ label, options, value, onChange }: {
 
 /** Sets and reps for the exercise just chosen, prefilled from its defaults. */
 function TargetSheet({ exercise, onBack, onConfirm }: {
-  exercise: Exercise; onBack: () => void; onConfirm: (sets: number, reps: number) => void
+  exercise: Exercise
+  onBack: () => void
+  onConfirm: (sets: number, reps: number, repsMax: number | null) => void
 }) {
   const [sets, setSets] = useState<number | null>(exercise.default_sets)
   const [reps, setReps] = useState<number | null>(exercise.default_reps)
+  const [repsMax, setRepsMax] = useState<number | null>(null)
+  const [ranged, setRanged] = useState(false)
+  const step = exercise.unit === 'metres' ? 100 : 1
+  const unit = `${UNIT_LABEL[exercise.unit]}${exercise.unilateral ? ' / side' : ''}`
 
   return (
     <Sheet open onClose={onBack} title={exercise.name}>
@@ -162,15 +168,29 @@ function TargetSheet({ exercise, onBack, onConfirm }: {
             <Stepper value={sets} onChange={setSets} min={1} />
           </div>
           <div>
-            <span className="label">{UNIT_LABEL[exercise.unit]}{exercise.unilateral ? ' / side' : ''}</span>
-            <Stepper value={reps} onChange={setReps} min={1} step={exercise.unit === 'metres' ? 100 : 1} />
+            <span className="label">{ranged ? `${unit} (min)` : unit}</span>
+            <Stepper value={reps} onChange={setReps} min={1} step={step} />
           </div>
         </div>
+
+        {ranged && (
+          <div>
+            <span className="label">{unit} (max)</span>
+            <Stepper value={repsMax} onChange={setRepsMax} min={reps ?? 1} step={step} />
+          </div>
+        )}
+
+        <Toggle
+          checked={ranged}
+          onChange={v => { setRanged(v); if (!v) setRepsMax(null); else setRepsMax((reps ?? 10) + 2) }}
+          label="Prescribe a range"
+          hint="For targets like 3 × 8-10 rather than a fixed number"
+        />
 
         <div className="flex gap-2">
           <button onClick={onBack} className="btn-ghost px-4 py-3">Back</button>
           <button
-            onClick={() => onConfirm(sets ?? 3, reps ?? 10)}
+            onClick={() => onConfirm(sets ?? 3, reps ?? 10, ranged ? repsMax : null)}
             className="btn-primary flex-1 py-3"
           >Add to workout</button>
         </div>

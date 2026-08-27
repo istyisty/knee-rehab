@@ -158,6 +158,7 @@ export async function planSession(templateId: string, date: string): Promise<str
     loadable: te.exercises!.loadable,
     target_sets: te.target_sets,
     target_reps: te.target_reps,
+    target_reps_max: te.target_reps_max ?? null,
     sort_order: i,
   }))
 
@@ -555,7 +556,8 @@ export async function deleteTemplate(id: string) {
 }
 
 export async function addTemplateExercise(
-  templateId: string, exercise: Exercise, sets: number, reps: number, sortOrder: number,
+  templateId: string, exercise: Exercise, sets: number, reps: number,
+  repsMax: number | null, sortOrder: number,
 ) {
   const { data, error } = await supabase
     .from('template_exercises')
@@ -564,6 +566,7 @@ export async function addTemplateExercise(
       exercise_id: exercise.id,
       target_sets: sets,
       target_reps: reps,
+      target_reps_max: repsMax,
       sort_order: sortOrder,
     })
     .select('*, exercises(*)').single()

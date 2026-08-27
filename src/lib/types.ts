@@ -51,7 +51,10 @@ export interface TemplateExercise {
   template_id: string
   exercise_id: string
   target_sets: number
+  /** Lower bound of the prescribed range — the number you have to hit. */
   target_reps: number
+  /** Upper bound, when the program prescribes a range. */
+  target_reps_max: number | null
   sort_order: number
   exercises?: Exercise
 }
@@ -80,6 +83,7 @@ export interface SessionExercise {
   loadable: boolean
   target_sets: number
   target_reps: number
+  target_reps_max: number | null
   sort_order: number
   notes: string | null
   session_sets?: SessionSet[]

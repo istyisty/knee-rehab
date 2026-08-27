@@ -57,7 +57,7 @@ export function Stepper({ value, onChange, step = 1, min = 0, max, suffix, place
             const n = e.target.value.trim() === '' ? null : Number(e.target.value)
             if (n == null || !Number.isNaN(n)) onChange(n)
           }}
-          className="w-full h-full bg-transparent px-0 text-center font-bold tabular-nums text-slate-100 focus:outline-none"
+          className="w-full h-full bg-transparent px-0 text-center font-bold tabular-nums text-slate-100 placeholder:text-ink-600 placeholder:font-medium focus:outline-none"
         />
         {suffix && draft !== '' && (
           <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-ink-500">{suffix}</span>

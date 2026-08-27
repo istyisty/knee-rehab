@@ -10,7 +10,7 @@ import {
   updateTemplate, updateTemplateExercise,
 } from '../lib/api'
 import type { Program, TemplateExercise, WorkoutTemplate } from '../lib/types'
-import { BLOCK_LABEL, UNIT_LABEL } from '../lib/format'
+import { UNIT_LABEL, fmtRepTarget } from '../lib/format'
 
 /** Create or edit one workout: its details and the exercises inside it. */
 export default function WorkoutEdit() {
@@ -70,10 +70,10 @@ export default function WorkoutEdit() {
     if (template) updateTemplate(template.id, p)
   }
 
-  const addExercise = async (exercise: any, sets: number, reps: number) => {
+  const addExercise = async (exercise: any, sets: number, reps: number, repsMax: number | null) => {
     if (!template) return
     try {
-      const row = await addTemplateExercise(template.id, exercise, sets, reps, items.length)
+      const row = await addTemplateExercise(template.id, exercise, sets, reps, repsMax, items.length)
       setItems(prev => [...prev, row])
     } catch (e: any) {
       setErr(e.message?.includes('duplicate')
@@ -190,9 +190,10 @@ export default function WorkoutEdit() {
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold text-sm truncate">{row.exercises?.name}</p>
                       <p className="text-[11px] text-ink-500 mt-0.5">
-                        {BLOCK_LABEL[row.exercises?.block ?? 'main']}
+                        {row.target_sets} × {fmtRepTarget(row.target_reps, row.target_reps_max)}{' '}
+                        {UNIT_LABEL[row.exercises?.unit ?? 'reps']}
+                        {row.exercises?.unilateral && ' per side'}
                         {row.exercises?.muscle_group && ` · ${row.exercises.muscle_group}`}
-                        {row.exercises?.unilateral && ' · per side'}
                       </p>
                     </div>
                     <div className="flex flex-col gap-1 shrink-0">
@@ -214,7 +215,9 @@ export default function WorkoutEdit() {
                         }} />
                     </div>
                     <div className="flex-1">
-                      <span className="label">{UNIT_LABEL[row.exercises?.unit ?? 'reps']}</span>
+                      <span className="label">
+                        {UNIT_LABEL[row.exercises?.unit ?? 'reps']}{row.target_reps_max != null ? ' (min)' : ''}
+                      </span>
                       <Stepper compact value={row.target_reps} min={1}
                         step={row.exercises?.unit === 'metres' ? 100 : 1}
                         onChange={v => {
@@ -223,11 +226,34 @@ export default function WorkoutEdit() {
                           updateTemplateExercise(row.id, { target_reps: reps })
                         }} />
                     </div>
+                    {row.target_reps_max != null && (
+                      <div className="flex-1">
+                        <span className="label">max</span>
+                        <Stepper compact value={row.target_reps_max} min={row.target_reps}
+                          step={row.exercises?.unit === 'metres' ? 100 : 1}
+                          onChange={v => {
+                            const max = v ?? row.target_reps
+                            setItems(prev => prev.map(x => x.id === row.id ? { ...x, target_reps_max: max } : x))
+                            updateTemplateExercise(row.id, { target_reps_max: max })
+                          }} />
+                      </div>
+                    )}
                     <button onClick={() => remove(row)} aria-label="Remove exercise"
                       className="h-11 w-11 shrink-0 grid place-items-center rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-400 active:scale-90">
                       <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
                     </button>
                   </div>
+
+                  <button
+                    onClick={() => {
+                      const max = row.target_reps_max == null ? row.target_reps + 2 : null
+                      setItems(prev => prev.map(x => x.id === row.id ? { ...x, target_reps_max: max } : x))
+                      updateTemplateExercise(row.id, { target_reps_max: max })
+                    }}
+                    className="mt-2 text-[11px] font-semibold text-ink-500 underline"
+                  >
+                    {row.target_reps_max == null ? 'Make it a range' : 'Use a fixed target'}
+                  </button>
                 </div>
               ))}
             </div>

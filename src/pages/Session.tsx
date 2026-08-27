@@ -13,7 +13,7 @@ import { useWakeLock } from '../lib/hooks'
 import type {
   AppSettings, Exercise, LastPerformance, SessionExercise, SessionSet, Side, Swelling, WorkoutSession,
 } from '../lib/types'
-import { BLOCK_LABEL, fmtWeight, longDate, prettyDate } from '../lib/format'
+import { BLOCK_LABEL, UNIT_LABEL, fmtRepTarget, fmtWeight, longDate, prettyDate } from '../lib/format'
 
 export default function SessionPage() {
   const { id } = useParams<{ id: string }>()
@@ -230,7 +230,8 @@ function ExerciseCard({
   const sets = exercise.session_sets ?? []
   const done = sets.filter(s => s.completed).length
   const complete = sets.length > 0 && done === sets.length
-  const unitLabel = exercise.unit === 'seconds' ? 'secs' : 'reps'
+  const unitLabel = UNIT_LABEL[exercise.unit] ?? 'reps'
+  const repTarget = fmtRepTarget(exercise.target_reps, exercise.target_reps_max)
   const sides: Side[] = exercise.unilateral ? ['left', 'right'] : ['both']
 
   // Group by set number so a single-leg set shows L and R together.
@@ -262,7 +263,7 @@ function ExerciseCard({
             {complete && <span className="text-mint-400 text-sm" aria-label="complete">✓</span>}
           </h3>
           <p className="text-xs text-ink-500 mt-0.5">
-            {exercise.target_sets} × {exercise.target_reps} {unitLabel}
+            {exercise.target_sets} × {repTarget} {unitLabel}
             {exercise.unilateral && ' per side'}
           </p>
           {cue && <p className="text-[11px] text-ink-600 mt-1.5 leading-snug">{cue}</p>}
@@ -289,6 +290,7 @@ function ExerciseCard({
                 <SetRow
                   key={set.id}
                   set={set}
+                  placeholder={repTarget}
                   label={exercise.unilateral ? SIDE_LABEL[side] : String(n)}
                   operated={exercise.unilateral && operatedSide === side}
                   loadable={exercise.loadable}
@@ -338,9 +340,10 @@ function LastTime({ last, loadable, unit }: { last: LastPerformance; loadable: b
   )
 }
 
-function SetRow({ set, label, operated, loadable, locked, restOnTick, onChange }: {
+function SetRow({ set, label, placeholder, operated, loadable, locked, restOnTick, onChange }: {
   set: SessionSet
   label: string
+  placeholder: string
   operated: boolean
   loadable: boolean
   locked: boolean
@@ -387,7 +390,7 @@ function SetRow({ set, label, operated, loadable, locked, restOnTick, onChange }
       </span>
       <div className="flex-1 min-w-0">
         <Stepper compact value={set.reps} onChange={v => setField('reps', v)}
-          placeholder={set.target_reps == null ? '–' : String(set.target_reps)} />
+          placeholder={placeholder} />
       </div>
       {loadable && (
         <div className="flex-1 min-w-0">

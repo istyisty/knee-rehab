@@ -47,9 +47,9 @@ export function makeDb() {
   ]
 
   const byName = n => exercises.find(e => e.name === n)
-  const te = (tpl, name, s, r, o) => ({
+  const te = (tpl, name, s, r, o, rMax = null) => ({
     id: uid('te'), template_id: tpl, exercise_id: byName(name).id,
-    target_sets: s, target_reps: r, sort_order: o,
+    target_sets: s, target_reps: r, target_reps_max: rMax, sort_order: o,
   })
 
   const templateExercises = [
@@ -66,6 +66,24 @@ export function makeDb() {
     te('tpl-b', 'Pogos', 2, 20, 0),
     te('tpl-b', 'Squat Jumps', 3, 5, 1),
   ]
+
+  const push = {
+    id: 'prog-push', name: 'Upper Body - Push/Pull',
+    description: 'Push/pull split, heavy power and hypertrophy days',
+    tracks_knee: false, schedule: {}, run_days: [],
+    archived: false, sort_order: 1, created_at: '2026-08-27',
+  }
+  templates.push(
+    { id: 'tpl-pa', program_id: push.id, name: 'Push (A) - Heavy Power', kind: 'strength', description: 'Heavy pressing, low reps', include_warmup: false, archived: false, sort_order: 0 },
+    { id: 'tpl-la', program_id: push.id, name: 'Pull (A) - Heavy Power', kind: 'strength', description: 'Heavy pulling, low reps', include_warmup: false, archived: false, sort_order: 1 },
+  )
+  templateExercises.push(
+    te('tpl-pa', 'Bench Press', 3, 5, 0, 8),
+    te('tpl-pa', 'Overhead Press', 3, 8, 1, 10),
+    te('tpl-pa', 'Plank', 3, 30, 2, 45),
+    te('tpl-la', 'Pull Up', 3, 5, 0, 8),
+    te('tpl-la', 'Romanian Deadlift', 3, 8, 1, 10),
+  )
 
   const mk = (id, tpl, name, date, status, extra = {}) => ({
     id, template_id: tpl, program_id: rehab.id, tracks_knee: true, name,
@@ -93,7 +111,8 @@ export function makeDb() {
       sessionExercises.push({
         id: seId, session_id: sessionId, exercise_id: e.id, name: e.name, block: e.block,
         unit: e.unit, unilateral: e.unilateral, loadable: e.loadable,
-        target_sets: row.target_sets, target_reps: row.target_reps, sort_order: i, notes: null,
+        target_sets: row.target_sets, target_reps: row.target_reps,
+        target_reps_max: row.target_reps_max ?? null, sort_order: i, notes: null,
       })
       const sides = e.unilateral ? ['left', 'right'] : ['both']
       for (let n = 1; n <= row.target_sets; n++) {
@@ -117,7 +136,7 @@ export function makeDb() {
   ]
 
   return {
-    exercises, programs: [rehab], workout_templates: templates,
+    exercises, programs: [rehab, push], workout_templates: templates,
     template_exercises: templateExercises, workout_sessions: sessions,
     session_exercises: sessionExercises, session_sets: sessionSets, runs,
     app_settings: [{ id: 1, operated_side: 'right', surgery_date: '2026-06-08', schedule: {}, auto_plan_days: 14 }],
