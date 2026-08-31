@@ -5,15 +5,19 @@ const PRESETS = [45, 60, 90, 120, 180]
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
-/** Pinned countdown, shown only while resting. Sits above the finish bar. */
-export function RestBar({ bottomOffset }: { bottomOffset: string }) {
+/**
+ * Countdown shown only while resting. It is NOT positioned itself — it stacks
+ * inside the bottom dock above the finish button, so the two can never overlap
+ * however tall either one gets.
+ */
+export function RestBar() {
   const { running, remaining, duration } = useRest()
   if (!running) return null
   const pct = duration > 0 ? (remaining / duration) * 100 : 0
 
   return (
-    <div className="fixed inset-x-0 z-30 px-4 animate-slideup" style={{ bottom: bottomOffset }}>
-      <div className="mx-auto max-w-md rounded-2xl bg-ink-850/95 backdrop-blur-xl border border-amber-500/30 shadow-lift overflow-hidden">
+    <div className="pb-2 animate-slideup">
+      <div className="rounded-2xl bg-ink-850 border border-amber-500/30 shadow-lift overflow-hidden">
         <div className="h-1 bg-ink-800">
           <div className="h-full bg-amber-500 transition-all duration-200" style={{ width: `${pct}%` }} />
         </div>

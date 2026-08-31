@@ -180,11 +180,12 @@ export default function SessionPage() {
         )}
       </div>
 
-      {session.status !== 'planned' && <RestBar bottomOffset="calc(4.75rem + env(safe-area-inset-bottom, 0px))" />}
-
+      {/* One dock: the rest timer stacks above the finish button rather than
+          floating over it at a hand-calculated offset. */}
       {session.status !== 'planned' && (
         <div className="fixed bottom-0 inset-x-0 z-30 bg-ink-950/90 backdrop-blur-xl border-t border-ink-800 pb-dock">
           <div className="mx-auto max-w-md px-4 py-3">
+            <RestBar />
             <button onClick={() => setFinishOpen(true)} className={isDone ? 'btn-ghost w-full py-3.5' : 'btn-primary w-full py-3.5'}>
               {isDone ? 'Edit rating & notes' : 'Finish workout'}
             </button>
